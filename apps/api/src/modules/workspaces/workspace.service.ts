@@ -1,0 +1,238 @@
+import { and, eq, isNull } from 'drizzle-orm';
+import type { Db } from '../../infra/db/client.js';
+import { membership, workspace, type Membership, type Workspace } from '../../infra/db/schema.js';
+import { withTenantScope } from '../../infra/db/tenant-scope.js';
+import { uuidv7 } from '../../shared/ids.js';
+import { recordAudit } from '../audit/audit.js';
+import type { Role, TenantContext } from '../tenancy/tenant-context.js';
+import { MAX_DAILY_CAP_PER_ACCOUNT, readSettings, type WorkspaceSettings } from './settings.js';
+import { slugSuffix, workspaceDefaultsFromEmail } from './slug.js';
+import { PUBLISH_TIME_RE, isValidTimeZone } from './timezone.js';
+
+export class ValidationError extends Error {
+  constructor(public readonly issues: { path: string; message: string }[]) {
+    super(issues.map((i) => `${i.path}: ${i.message}`).join('; '));
+    this.name = 'ValidationError';
+  }
+}
+
+export interface WorkspaceSummary {
+  id: string;
+  slug: string;
+  name: string;
+  role: Role;
+}
+
+export interface WorkspacePatch {
+  name?: string | undefined;
+  defaultTimezone?: string | undefined;
+  defaultPublishTime?: string | undefined;
+  /** Posts per social account per rolling 24 h; null restores the default. */
+  dailyCapPerAccount?: number | null | undefined;
+  notionWebhooks?: boolean | undefined;
+}
+
+const DEFAULT_TIMEZONE = 'UTC';
+
+/**
+ * Workspace lifecycle and settings (architecture §4, PRD §4.1).
+ * Reads and writes are always scoped by membership; there is no unscoped read.
+ */
+export class WorkspaceService {
+  constructor(private readonly db: Db) {}
+
+  /** Workspaces the user belongs to, with their role. */
+  async listForUser(userId: string): Promise<WorkspaceSummary[]> {
+    const rows = await this.db
+      .select({
+        id: workspace.id,
+        slug: workspace.slug,
+        name: workspace.name,
+        role: membership.role,
+      })
+      .from(membership)
+      .innerJoin(workspace, eq(workspace.id, membership.workspaceId))
+      .where(and(eq(membership.userId, userId), isNull(workspace.deletedAt)))
+      .orderBy(workspace.createdAt);
+    return rows;
+  }
+
+  /** Membership lookup used by the tenancy guard; null means "not a member" (→ 404). */
+  async findMembership(userId: string, workspaceId: string): Promise<Membership | null> {
+    const [row] = await this.db
+      .select()
+      .from(membership)
+      .where(and(eq(membership.userId, userId), eq(membership.workspaceId, workspaceId)))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /** Tenant-scoped read. */
+  async get(ctx: TenantContext): Promise<Workspace> {
+    const [row] = await withTenantScope(this.db, ctx.workspaceId, (tx) =>
+      tx
+        .select()
+        .from(workspace)
+        .where(and(eq(workspace.id, ctx.workspaceId), isNull(workspace.deletedAt)))
+        .limit(1),
+    );
+    if (!row) throw new Error(`workspace ${ctx.workspaceId} not found for tenant context`);
+    return row;
+  }
+
+  /**
+   * Idempotently ensures a user has at least one workspace; creates a default
+   * one with an `owner` membership on first sign-in (PRD §7.1).
+   */
+  async ensureDefaultWorkspace(
+    user: { id: string; email: string },
+    correlationId: string,
+  ): Promise<Workspace> {
+    const existing = await this.listForUser(user.id);
+    const first = existing[0];
+    if (first) {
+      const [row] = await this.db.select().from(workspace).where(eq(workspace.id, first.id));
+      if (row) return row;
+    }
+    const { name, slugBase } = workspaceDefaultsFromEmail(user.email);
+    return this.create(
+      { name, slugBase, defaultTimezone: DEFAULT_TIMEZONE },
+      user.id,
+      correlationId,
+    );
+  }
+
+  async create(
+    input: { name: string; slugBase: string; defaultTimezone: string },
+    ownerUserId: string,
+    correlationId: string,
+  ): Promise<Workspace> {
+    if (!isValidTimeZone(input.defaultTimezone)) {
+      throw new ValidationError([{ path: 'defaultTimezone', message: 'unknown IANA time zone' }]);
+    }
+    const id = uuidv7();
+    const actor = { type: 'user', id: ownerUserId, role: 'owner' } as const;
+    return this.db.transaction(async (tx) => {
+      let created: Workspace | undefined;
+      for (let attempt = 0; attempt < 3 && !created; attempt++) {
+        const slug = attempt === 0 ? input.slugBase : `${input.slugBase}-${slugSuffix()}`;
+        const [row] = await tx
+          .insert(workspace)
+          .values({ id, slug, name: input.name, defaultTimezone: input.defaultTimezone })
+          .onConflictDoNothing({ target: workspace.slug })
+          .returning();
+        created = row;
+      }
+      if (!created) throw new Error('could not allocate a unique workspace slug');
+      const membershipId = uuidv7();
+      await tx.insert(membership).values({
+        id: membershipId,
+        workspaceId: created.id,
+        userId: ownerUserId,
+        role: 'owner',
+      });
+      await recordAudit(tx, {
+        workspaceId: created.id,
+        actor,
+        entityType: 'workspace',
+        entityId: created.id,
+        event: 'workspace.created',
+        correlationId,
+        data: { slug: created.slug, defaultTimezone: created.defaultTimezone },
+      });
+      await recordAudit(tx, {
+        workspaceId: created.id,
+        actor,
+        entityType: 'membership',
+        entityId: membershipId,
+        event: 'membership.created',
+        correlationId,
+        data: { userId: ownerUserId, role: 'owner' },
+      });
+      return created;
+    });
+  }
+
+  /** Tenant-scoped settings update; the guard has already checked the role. */
+  async update(ctx: TenantContext, patch: WorkspacePatch): Promise<Workspace> {
+    const issues: { path: string; message: string }[] = [];
+    const values: Partial<typeof workspace.$inferInsert> = { updatedAt: new Date() };
+    if (patch.name !== undefined) {
+      const name = patch.name.trim();
+      if (name.length < 1 || name.length > 80)
+        issues.push({ path: 'name', message: '1–80 characters' });
+      else values.name = name;
+    }
+    if (patch.defaultTimezone !== undefined) {
+      if (!isValidTimeZone(patch.defaultTimezone)) {
+        issues.push({ path: 'defaultTimezone', message: 'unknown IANA time zone' });
+      } else values.defaultTimezone = patch.defaultTimezone;
+    }
+    if (patch.defaultPublishTime !== undefined) {
+      if (!PUBLISH_TIME_RE.test(patch.defaultPublishTime)) {
+        issues.push({ path: 'defaultPublishTime', message: 'expected HH:MM (24h)' });
+      } else values.defaultPublishTime = patch.defaultPublishTime;
+    }
+    if (patch.dailyCapPerAccount !== undefined && patch.dailyCapPerAccount !== null) {
+      const cap = patch.dailyCapPerAccount;
+      if (!Number.isInteger(cap) || cap < 1 || cap > MAX_DAILY_CAP_PER_ACCOUNT) {
+        issues.push({
+          path: 'dailyCapPerAccount',
+          message: `integer between 1 and ${MAX_DAILY_CAP_PER_ACCOUNT}`,
+        });
+      }
+    }
+    if (issues.length > 0) throw new ValidationError(issues);
+
+    return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
+      const [before] = await tx
+        .select()
+        .from(workspace)
+        .where(and(eq(workspace.id, ctx.workspaceId), isNull(workspace.deletedAt)))
+        .limit(1)
+        .for('update');
+      if (!before) throw new Error(`workspace ${ctx.workspaceId} not found for tenant context`);
+      if (patch.dailyCapPerAccount !== undefined || patch.notionWebhooks !== undefined) {
+        // Unknown keys are kept; known keys are replaced or removed explicitly.
+        const merged: Record<string, unknown> = { ...(before.settings as Record<string, unknown>) };
+        const settings: WorkspaceSettings = { ...readSettings(before) };
+        if (patch.dailyCapPerAccount === null) {
+          delete settings.dailyCapPerAccount;
+          delete merged['dailyCapPerAccount'];
+        } else if (patch.dailyCapPerAccount !== undefined) {
+          settings.dailyCapPerAccount = patch.dailyCapPerAccount;
+        }
+        if (patch.notionWebhooks !== undefined) settings.notionWebhooks = patch.notionWebhooks;
+        values.settings = { ...merged, ...settings };
+      }
+      const [after] = await tx
+        .update(workspace)
+        .set(values)
+        .where(and(eq(workspace.id, ctx.workspaceId), isNull(workspace.deletedAt)))
+        .returning();
+      if (!after) throw new Error(`workspace ${ctx.workspaceId} vanished during update`);
+      const changed: Record<string, { from: unknown; to: unknown }> = Object.fromEntries(
+        (['name', 'defaultTimezone', 'defaultPublishTime'] as const)
+          .filter((k) => before[k] !== after[k])
+          .map((k) => [k, { from: before[k], to: after[k] }]),
+      );
+      const settingsBefore = readSettings(before);
+      const settingsAfter = readSettings(after);
+      for (const k of ['dailyCapPerAccount', 'notionWebhooks'] as const) {
+        if (settingsBefore[k] !== settingsAfter[k]) {
+          changed[k] = { from: settingsBefore[k] ?? null, to: settingsAfter[k] ?? null };
+        }
+      }
+      await recordAudit(tx, {
+        workspaceId: ctx.workspaceId,
+        actor: ctx.actor,
+        entityType: 'workspace',
+        entityId: ctx.workspaceId,
+        event: 'workspace.updated',
+        correlationId: ctx.correlationId,
+        data: { changed },
+      });
+      return after;
+    });
+  }
+}

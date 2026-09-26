@@ -1,0 +1,36 @@
+{
+  "name": "postelyo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Content workflow and social publishing platform",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev:api --workspace apps/api",
+    "dev:worker": "npm run dev:worker --workspace apps/api",
+    "build": "npm run build --workspaces",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm run test --workspaces",
+    "test:integration": "npm run test:integration --workspaces",
+    "db:generate": "npm run db:generate --workspace apps/api",
+    "db:migrate": "npm run db:migrate --workspace apps/api",
+    "preflight": "npm run preflight --workspace apps/api",
+    "notion:template": "npm run notion:template --workspace apps/api --",
+    "seed": "npm run seed --workspace apps/api --"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.11.0",
+    "prettier": "^3.9.8",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.70.1"
+  }
+}

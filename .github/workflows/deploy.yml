@@ -1,0 +1,83 @@
+name: Deploy
+
+# Architecture §18.1: build once, migrate, deploy worker then api (Fly rolls both
+# process groups from the same image; migrations run as the release command).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Environment to deploy
+        type: choice
+        options: [staging, production]
+        default: staging
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    name: Build image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tag }}
+          build-args: APP_VERSION=${{ github.sha }}
+
+  staging:
+    name: Deploy staging
+    needs: image
+    if: github.event_name == 'push' || inputs.target == 'staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: >
+          flyctl deploy --config deploy/fly.toml --app "$FLY_APP"
+          --image "${{ needs.image.outputs.tag }}"
+          --env APP_VERSION="${{ github.sha }}" --wait-timeout 300
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP: ${{ vars.FLY_APP_STAGING }}
+      - name: Smoke check
+        run: curl --fail --silent "https://${{ vars.FLY_APP_STAGING }}.fly.dev/health/ready"
+
+  production:
+    name: Deploy production
+    needs: [image, staging]
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production'
+    runs-on: ubuntu-latest
+    # Requires a reviewer approval configured on the "production" environment.
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: >
+          flyctl deploy --config deploy/fly.toml --app "$FLY_APP"
+          --image "${{ needs.image.outputs.tag }}"
+          --env APP_VERSION="${{ github.sha }}" --wait-timeout 300
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_APP: ${{ vars.FLY_APP_PRODUCTION }}
+      - name: Smoke check
+        run: curl --fail --silent "https://${{ vars.FLY_APP_PRODUCTION }}.fly.dev/health/ready"
