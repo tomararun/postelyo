@@ -9,6 +9,7 @@ import { requireMembership } from '../plugins/tenancy.js';
 
 const inviteBody = z.object({ email: z.email(), role: z.enum(ROLES) }).strict();
 const roleBody = z.object({ role: z.enum(ROLES) }).strict();
+const prefsBody = z.object({ weeklyReport: z.boolean().optional() }).strict();
 
 function problem(
   reply: FastifyReply,
@@ -58,6 +59,18 @@ export const teamRoutes: FastifyPluginAsync<TeamRoutesOptions> = async (app, opt
   app.get('/v1/workspaces/:workspaceId/members', { preHandler: viewer }, async (req) => ({
     members: await opts.invitations.members(req.tenant!),
   }));
+
+  /** Phase 5: the signed-in member's own preferences. */
+  app.patch(
+    '/v1/workspaces/:workspaceId/members/me',
+    { preHandler: requireMembership(opts.workspaces, 'viewer') },
+    async (req, reply) => {
+      const parsed = prefsBody.safeParse(req.body ?? {});
+      if (!parsed.success) return problem(reply, req, 400, 'weeklyReport must be a boolean');
+      await opts.invitations.setOwnPreferences(req.tenant!, req.user!.id, parsed.data);
+      return { ok: true, ...parsed.data };
+    },
+  );
 
   app.patch(
     '/v1/workspaces/:workspaceId/members/:userId',

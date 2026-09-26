@@ -186,6 +186,7 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     workspaces,
     approvals: deps.services.approvals,
     campaigns: deps.services.campaigns,
+    analytics: deps.services.analytics,
   });
   await app.register(publicationRoutes, { workspaces, publications });
   return app;

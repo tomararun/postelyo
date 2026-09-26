@@ -14,6 +14,7 @@ export function Shell({
   const nav = workspace
     ? [
         ['Posts', `/w/${workspace.id}/posts`],
+        ['Analytics', `/w/${workspace.id}/analytics`],
         ['Connections', `/w/${workspace.id}/connections`],
         ['Team', `/w/${workspace.id}/team`],
         ['Billing', `/w/${workspace.id}/billing`],

@@ -71,6 +71,14 @@ describe('pilot tooling', () => {
         'First Comment',
         'Approval',
         'Link Report',
+        // Phase 5 metric columns
+        'Impressions',
+        'Reach',
+        'Reactions',
+        'Comments',
+        'Shares',
+        'Clicks',
+        'Metrics Updated',
       ].sort(),
     );
 

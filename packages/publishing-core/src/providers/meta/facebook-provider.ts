@@ -1,6 +1,8 @@
 import type {
   CommentInput,
   CommentResult,
+  MetricsInput,
+  MetricsResult,
   PostSnapshot,
   ProviderCapabilities,
   ProviderContext,
@@ -19,7 +21,7 @@ import {
   validateAgainstCapabilities,
 } from '../../render.js';
 import { asRecord, classifyNetworkError, parseJson, rawOf, str } from '../shared/graph-errors.js';
-import { GRAPH_URL, classifyGraph, form, graphComment } from './graph.js';
+import { GRAPH_URL, classifyGraph, form, graphComment, graphGet, insightValues } from './graph.js';
 
 /**
  * Facebook Pages adapter (Phase 2): posts to a Page's feed with the Page
@@ -53,6 +55,7 @@ export class FacebookProvider implements PublishingProvider {
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: FACEBOOK_MAX_IMAGE_BYTES,
       firstComment: true,
+      metrics: true,
       image: { delivery: 'url', outputMimeType: 'image/jpeg', maxWidth: 2048 },
     };
   }
@@ -129,6 +132,42 @@ export class FacebookProvider implements PublishingProvider {
       };
     }
     return classifyGraph(res, text, raw, 'Facebook', true);
+  }
+
+  /**
+   * Phase 5 metrics: `/{post-id}/insights` for impressions, reach, clicks and
+   * reactions plus the post's share and comment counts. Needs
+   * `pages_read_engagement` (and `read_insights` for impressions).
+   */
+  async metrics(input: MetricsInput, ctx: ProviderContext): Promise<MetricsResult> {
+    const id = encodeURIComponent(input.providerPostId);
+    const insightsUrl = new URL(`${this.graphUrl}/${id}/insights`);
+    insightsUrl.searchParams.set(
+      'metric',
+      'post_impressions,post_impressions_unique,post_clicks,post_reactions_by_type_total',
+    );
+    const insights = await graphGet(this.fetchImpl, insightsUrl, ctx, 'Facebook');
+    if (!insights.ok) return insights.result;
+    const fieldsUrl = new URL(`${this.graphUrl}/${id}`);
+    fieldsUrl.searchParams.set('fields', 'shares,comments.summary(true).limit(0)');
+    const fields = await graphGet(this.fetchImpl, fieldsUrl, ctx, 'Facebook');
+    const v = insightValues(insights.json);
+    const shares = fields.ok ? asRecord(fields.json['shares']) : {};
+    const comments = fields.ok ? asRecord(asRecord(fields.json['comments'])['summary']) : {};
+    const n = (o: Record<string, unknown>, k: string) => (typeof o[k] === 'number' ? o[k] : null);
+    return {
+      kind: 'metrics',
+      metrics: {
+        impressions: v['post_impressions'] ?? null,
+        reach: v['post_impressions_unique'] ?? null,
+        reactions: v['post_reactions_by_type_total'] ?? null,
+        comments: n(comments, 'total_count'),
+        shares: n(shares, 'count'),
+        clicks: v['post_clicks'] ?? null,
+        saves: null,
+      },
+      raw: insights.raw,
+    };
   }
 
   /** First comment under the Page post (`/{post-id}/comments`). */

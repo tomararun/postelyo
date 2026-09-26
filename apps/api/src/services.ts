@@ -22,6 +22,10 @@ import { CampaignService } from './modules/campaigns/campaign.service.js';
 import { IdeaService } from './modules/posts/idea.service.js';
 import { LinkService } from './modules/links/link.service.js';
 import { SeriesService } from './modules/posts/series.service.js';
+import { AnalyticsQueryService } from './modules/analytics/analytics-query.service.js';
+import { AnalyticsWritebackService } from './modules/analytics/analytics-writeback.service.js';
+import { PostMetricsService } from './modules/analytics/metrics.service.js';
+import { WeeklyReportService } from './modules/analytics/weekly-report.service.js';
 import { PostQueryService } from './modules/posts/post-query.service.js';
 import { PublishEngine } from './modules/publishing/engine.js';
 import type { JobEnqueuer } from './modules/publishing/jobs.js';
@@ -124,6 +128,11 @@ export interface Services {
   series: SeriesService;
   ideas: IdeaService;
   approvals: ApprovalService;
+  /** Phase 5 */
+  postMetrics: PostMetricsService;
+  analytics: AnalyticsQueryService;
+  analyticsWriteback: AnalyticsWritebackService;
+  weeklyReport: WeeklyReportService;
 }
 
 /** One composition root shared by the api and worker roles (architecture §2.1). */
@@ -246,7 +255,37 @@ export function buildServices(deps: ServiceDeps): Services {
     logger: deps.logger,
     workerId: deps.workerId,
     links,
+    onPublished: (pub) => postMetrics.scheduleAfterPublish(pub),
     ...(deps.random ? { random: deps.random } : {}),
+  });
+  // Phase 5 analytics.
+  const postMetrics = new PostMetricsService({
+    db: deps.db,
+    providers,
+    socialAccounts,
+    contentSources,
+    enqueue: deps.enqueue,
+    clock,
+    logger: deps.logger,
+    ...fetchOpt,
+  });
+  const analytics = new AnalyticsQueryService({ db: deps.db, clock });
+  const analyticsWriteback = new AnalyticsWritebackService({
+    db: deps.db,
+    contentSources,
+    analytics,
+    clock,
+    logger: deps.logger,
+    ...fetchOpt,
+  });
+  const weeklyReport = new WeeklyReportService({
+    db: deps.db,
+    mailer: deps.mailer,
+    analytics,
+    clock,
+    logger: deps.logger,
+    appBaseUrl: deps.env.APP_BASE_URL,
+    environment: deps.env.NODE_ENV,
   });
   const resultWriteback = new ResultWritebackService({
     db: deps.db,
@@ -256,7 +295,13 @@ export function buildServices(deps: ServiceDeps): Services {
     links,
     ...fetchOpt,
   });
-  const publications = new PublicationService(deps.db, deps.enqueue, clock, links);
+  const publications = new PublicationService(
+    deps.db,
+    deps.enqueue,
+    clock,
+    links,
+    () => postMetrics,
+  );
   const reconciliation = new ReconciliationService({
     db: deps.db,
     providers,
@@ -353,5 +398,9 @@ export function buildServices(deps: ServiceDeps): Services {
     series,
     ideas,
     approvals,
+    postMetrics,
+    analytics,
+    analyticsWriteback,
+    weeklyReport,
   };
 }

@@ -191,6 +191,27 @@ export function runProviderContractSuite(name: string, make: () => PublishingPro
       else expect(typeof result.retryable).toBe('boolean');
     });
 
+    it('metrics, when declared, resolve to metrics or unavailable and never throw', async () => {
+      const p = make();
+      if (!p.capabilities().metrics) {
+        expect(typeof p.metrics).toBe('undefined');
+        return;
+      }
+      expect(typeof p.metrics).toBe('function');
+      const result = await p.metrics!(
+        { publicationId: 'pub-1', account, providerPostId: 'post-id-1' },
+        ctx,
+      );
+      expect(['metrics', 'unavailable']).toContain(result.kind);
+      if (result.kind === 'metrics') {
+        for (const v of Object.values(result.metrics)) {
+          expect(v === null || (typeof v === 'number' && Number.isFinite(v))).toBe(true);
+        }
+      } else {
+        expect(typeof result.retryable).toBe('boolean');
+      }
+    });
+
     it('rejects more images than supported', () => {
       const p = make();
       const caps = p.capabilities();

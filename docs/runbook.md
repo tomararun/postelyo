@@ -84,6 +84,7 @@ Per-workspace counts of published, failed, needs-review, accounts needing re-aut
 | Configure evergreen slots | Dashboard → Settings → Evergreen slots, or `PATCH … {"evergreen": {"slots": [{"weekday": 1, "time": "10:00"}], "minGapDays": 30}}` | admin+ |
 | Turn on approval enforcement and pick reviewers | Dashboard → Settings → Approval policy, or `PATCH … {"approval": {"required": true, "reviewers": ["<user id>"]}}` | admin+ |
 | Approve / revoke a post | Dashboard → Posts → Awaiting approval; `POST …/posts/:id/approve`, `DELETE …/posts/:id/approvals` | reviewer or owner / admin |
+| Turn the weekly report on or off for yourself | Dashboard → Settings → Weekly report, or `PATCH /v1/workspaces/:ws/members/me {"weeklyReport": false}` | owner or admin |
 | Retry a failed first comment | Maintenance retries `pending` comments up to 3 attempts; a `failed` one is final: post the comment by hand or edit `First Comment` and re-schedule | operator |
 | Delete a workspace | Dashboard → Settings → *Danger zone* (type DELETE), or `DELETE /v1/workspaces/:ws` → 202; purge runs 10 minutes later | owner |
 | Undo a deletion within the 10-minute window | `update workspace set deleted_at = null where id = '...'`; the purge job then reports `skipped`. Cancelled publications stay cancelled (reschedule in Notion) | operator |
@@ -116,6 +117,13 @@ Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by
 2. Set `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` (both or neither) and redeploy. The Connections page then shows *Connect with Notion*; the pasted-token form stays.
 3. Until Notion approves the integration only workspaces you own can install it; the token path covers everyone else meanwhile.
 4. A source that shows *Notion is connected but not set up yet* is a pending OAuth source (`content_source.status = disabled`, `config.setupPending = true`); the user finishes it at `/w/:ws/setup?source=...`. Disconnecting it discards the token.
+
+### Phase 5 metrics and reports
+- Queue `metrics-fetch` (worker consumer, concurrency 2). A publication's schedule: `select metrics_tier, metrics_next_at, metrics_attempts, metrics_error from publication where id = '…'`; snapshots: `select tier, fetched_at, impressions, reactions, comments, shares, clicks from publication_metric where publication_id = '…' order by tier`.
+- `metrics_error` set and `metrics_next_at` null means the platform refused permanently (missing permission, deleted post) or ten retryable failures in a row; fix the cause (re-authorize, app review) and clear both columns to let backfill pick it up: `update publication set metrics_error = null where id = '…'`.
+- Budget: 200 fetches per workspace, provider and hour; over budget the job defers an hour (`outcome: budget` in the worker log).
+- Rollups: `content_source.config.analyticsWrittenAt` shows the last Analytics database write; `analyticsRows` maps week keys to page ids. Delete a key to recreate its row.
+- Weekly report: Monday 08:00 workspace time; `workspace.settings.weeklyReportLastWeek` is the marker (delete it to resend). `report.weekly_sent` audits list recipients and posts.
 
 ### Phase 4 companions (campaigns, series, evergreen, ideas)
 All of it runs inside the Notion sync; the sync summary (`content_source.synced` audit, `extras` in the manual sync response) shows `campaignsSeen`, `summariesWritten`, `instancesCreated`, `instancesUpdated`, `evergreenFilled`, `ideasSeen`, `promoted` and `warnings`. Useful queries:

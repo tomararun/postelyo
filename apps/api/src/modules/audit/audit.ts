@@ -59,7 +59,11 @@ export type AuditEvent =
   | 'idea.promoted'
   | 'approval.granted'
   | 'approval.revoked'
-  | 'publication.first_comment';
+  | 'publication.first_comment'
+  | 'metrics.fetched'
+  | 'metrics.stopped'
+  | 'analytics.rollup_written'
+  | 'report.weekly_sent';
 
 export type AuditEntityType =
   | 'workspace'

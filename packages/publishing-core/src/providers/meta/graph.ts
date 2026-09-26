@@ -1,6 +1,7 @@
 import type {
   CommentInput,
   CommentResult,
+  MetricsResult,
   ProviderContext,
   PublishResult,
 } from '../../provider.js';
@@ -156,6 +157,77 @@ export async function graphComment(
     retryable,
     raw,
   };
+}
+
+/** Phase 5: a Graph GET whose failure maps to a metrics `unavailable` result. */
+export async function graphGet(
+  fetchImpl: typeof fetch,
+  url: URL,
+  ctx: ProviderContext,
+  provider: string,
+): Promise<
+  { ok: true; json: Record<string, unknown>; raw: unknown } | { ok: false; result: MetricsResult }
+> {
+  let res: Response;
+  try {
+    res = await fetchImpl(url.toString(), {
+      method: 'GET',
+      headers: { authorization: `Bearer ${ctx.credentials.accessToken}` },
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    });
+  } catch (err) {
+    return {
+      ok: false,
+      result: {
+        kind: 'unavailable',
+        reason: `${provider} unreachable: ${(err as Error).message}`,
+        retryable: true,
+      },
+    };
+  }
+  const text = await res.text().catch(() => '');
+  const raw = { status: res.status, body: text.slice(0, 2000) };
+  if (!res.ok) {
+    const err = graphError(text);
+    const code = err?.code ?? 0;
+    const rateLimited =
+      res.status === 429 || code === 4 || code === 17 || code === 32 || code === 613;
+    const retryable = rateLimited || res.status >= 500 || code === 1 || code === 2;
+    return {
+      ok: false,
+      result: {
+        kind: 'unavailable',
+        reason: `${provider} metrics failed: ${err?.message ?? res.statusText}`,
+        retryable,
+        ...(rateLimited ? { retryAfterMs: 60 * 60_000 } : {}),
+        raw,
+      },
+    };
+  }
+  return { ok: true, json: parseJson(text), raw };
+}
+
+/** `/insights` responses: `data[].name` → the latest value (`values[0].value` or `total_value.value`). */
+export function insightValues(json: Record<string, unknown>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const raw of Array.isArray(json['data']) ? json['data'] : []) {
+    const item = asRecord(raw);
+    const name = str(item, 'name');
+    if (!name) continue;
+    const values = Array.isArray(item['values']) ? item['values'] : [];
+    const first = asRecord(values[0]);
+    const total = asRecord(item['total_value']);
+    const v = first['value'] ?? total['value'];
+    if (typeof v === 'number') out[name] = v;
+    else if (typeof v === 'object' && v !== null) {
+      // e.g. post_reactions_by_type_total: { like: 3, love: 1 }
+      out[name] = Object.values(v as Record<string, unknown>).reduce<number>(
+        (sum, x) => sum + (typeof x === 'number' ? x : 0),
+        0,
+      );
+    }
+  }
+  return out;
 }
 
 export function form(fields: Record<string, string | undefined>): URLSearchParams {

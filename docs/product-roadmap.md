@@ -230,7 +230,9 @@ Keep every change additive to the Notion contract; document the v1→v2 upgrade 
 
 ---
 
-## Phase 5 – Analytics back into Notion
+## Phase 5 – Analytics back into Notion (built 2026-09-26)
+
+**Status.** Built and tested against fakes: metrics capability for every adapter, tiered fetches on a separate queue with budgets, backfill and retention, per-post and Analytics-database writeback, weekly report with opt-out, dashboard charts and best-time/hashtag suggestions. Campaign-level rollups were folded into the existing campaign summary rather than a separate Analytics row. Details in [roadmap.md](./roadmap.md) Phase 5 and architecture §7.5.
 
 **Goal.** Results live next to the content: every post page shows how it performed, and the team gets a weekly picture.
 

@@ -41,6 +41,8 @@ export interface ProviderCapabilities {
   imageRequired?: boolean;
   /** Phase 4: the adapter implements `comment()` (first comment after publishing). */
   firstComment?: boolean;
+  /** Phase 5: the adapter implements `metrics()` (per-post performance numbers). */
+  metrics?: boolean;
 }
 
 /** What the engine knows about the target account; never contains secrets. */
@@ -160,6 +162,51 @@ export type CommentResult =
   | { kind: 'posted'; commentId: string; raw?: unknown }
   | { kind: 'failed'; reason: string; retryable: boolean; raw?: unknown };
 
+/**
+ * Phase 5: normalised per-post metrics. Every field is null when the platform
+ * does not expose it for this account or post; adapters never estimate.
+ */
+export interface PostMetrics {
+  impressions: number | null;
+  reach: number | null;
+  reactions: number | null;
+  comments: number | null;
+  shares: number | null;
+  clicks: number | null;
+  saves: number | null;
+}
+
+export interface MetricsInput {
+  publicationId: string;
+  account: SocialAccountRef;
+  providerPostId: string;
+}
+
+/**
+ * `unavailable` with `retryable: true` means try again later (rate limit,
+ * transient, or metrics not yet computed); `retryable: false` means this post
+ * or account will never report metrics (missing permission, deleted post).
+ */
+export type MetricsResult =
+  | { kind: 'metrics'; metrics: PostMetrics; raw?: unknown }
+  | {
+      kind: 'unavailable';
+      reason: string;
+      retryable: boolean;
+      retryAfterMs?: number;
+      raw?: unknown;
+    };
+
+export const EMPTY_METRICS: PostMetrics = {
+  impressions: null,
+  reach: null,
+  reactions: null,
+  comments: null,
+  shares: null,
+  clicks: null,
+  saves: null,
+};
+
 /** A post seen at the provider; used to reconcile `ambiguous` outcomes. */
 export interface ProviderPostRef {
   providerPostId: string;
@@ -193,6 +240,11 @@ export interface PublishingProvider {
    * normal call and must be safe to call once per publication.
    */
   comment?(input: CommentInput, ctx: ProviderContext): Promise<CommentResult>;
+  /**
+   * Optional (Phase 5): current performance numbers of a published post.
+   * Declared through `capabilities().metrics`; never throws for a normal call.
+   */
+  metrics?(input: MetricsInput, ctx: ProviderContext): Promise<MetricsResult>;
 }
 
 /** Content types re-exported so adapters depend on this contract only. */

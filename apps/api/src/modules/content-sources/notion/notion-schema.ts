@@ -55,6 +55,14 @@ export const NOTION_CONTRACT: readonly ContractProperty[] = [
   { name: 'Repeat Of', types: ['relation'], required: false, owner: 'system', silent: true },
   { name: 'Approval', types: ['select'], required: false, owner: 'system', silent: true },
   { name: 'Link Report', types: ['rich_text'], required: false, owner: 'system', silent: true },
+  // Phase 5: per-post metrics, written when the columns exist.
+  { name: 'Impressions', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Reach', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Reactions', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Comments', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Shares', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Clicks', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Metrics Updated', types: ['date'], required: false, owner: 'system', silent: true },
   // System-owned select options are created on write, so only the property must exist.
   { name: 'Postelyo Status', types: ['select'], required: true, owner: 'system' },
   { name: 'Postelyo Note', types: ['rich_text'], required: true, owner: 'system' },
@@ -82,6 +90,23 @@ export const CAMPAIGN_CONTRACT: readonly ContractProperty[] = [
     owner: 'system',
     silent: true,
   },
+];
+
+/** Phase 5 companion database: analytics rollups, one row per week and platform plus a best-times row. */
+export const ANALYTICS_CONTRACT: readonly ContractProperty[] = [
+  { name: 'Name', types: ['title'], required: true, owner: 'system' },
+  { name: 'Week', types: ['date'], required: false, owner: 'system', silent: true },
+  { name: 'Platform', types: ['select'], required: false, owner: 'system', silent: true },
+  { name: 'Posts', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Impressions', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Reach', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Reactions', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Comments', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Shares', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Clicks', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Saves', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Engagement Rate', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Best Time', types: ['rich_text'], required: false, owner: 'system', silent: true },
 ];
 
 /** Phase 4 companion database: ideas. `Status = Promote` triggers promotion to a draft post. */

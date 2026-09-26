@@ -136,6 +136,8 @@ export const membership = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
     role: membershipRole('role').notNull(),
+    /** Phase 5: receive the workspace's weekly analytics email (owners and admins). */
+    weeklyReport: boolean('weekly_report').notNull().default(true),
     ...timestamps,
   },
   (t) => [
@@ -484,6 +486,12 @@ export const publication = pgTable(
     firstCommentId: text('first_comment_id'),
     firstCommentError: text('first_comment_error'),
     firstCommentAttempts: integer('first_comment_attempts').notNull().default(0),
+    /** Phase 5 metrics schedule: completed fetch tiers (0–5), next due time, last error. */
+    metricsTier: integer('metrics_tier').notNull().default(0),
+    metricsNextAt: timestamp('metrics_next_at', { withTimezone: true }),
+    metricsFetchedAt: timestamp('metrics_fetched_at', { withTimezone: true }),
+    metricsAttempts: integer('metrics_attempts').notNull().default(0),
+    metricsError: text('metrics_error'),
     ...timestamps,
   },
   (t) => [
@@ -584,6 +592,38 @@ export const shortLink = pgTable(
 );
 
 export type ShortLink = typeof shortLink.$inferSelect;
+
+/** Phase 5: one metrics snapshot per publication and fetch tier (1 h, 6 h, 24 h, 7 d, 30 d). */
+export const publicationMetric = pgTable(
+  'publication_metric',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    publicationId: uuid('publication_id')
+      .notNull()
+      .references(() => publication.id, { onDelete: 'cascade' }),
+    provider: socialProvider('provider').notNull(),
+    tier: integer('tier').notNull(),
+    fetchedAt: timestamp('fetched_at', { withTimezone: true }).notNull(),
+    impressions: integer('impressions'),
+    reach: integer('reach'),
+    reactions: integer('reactions'),
+    comments: integer('comments'),
+    shares: integer('shares'),
+    clicks: integer('clicks'),
+    saves: integer('saves'),
+    /** Truncated provider payload for support. */
+    raw: jsonb('raw'),
+  },
+  (t) => [
+    uniqueIndex('publication_metric_tier_uq').on(t.publicationId, t.tier),
+    index('publication_metric_workspace_idx').on(t.workspaceId, t.fetchedAt),
+  ],
+);
+
+export type PublicationMetric = typeof publicationMetric.$inferSelect;
 
 export const attemptOutcome = pgEnum('attempt_outcome', [
   'succeeded',

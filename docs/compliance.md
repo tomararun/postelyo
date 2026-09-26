@@ -18,6 +18,7 @@ Status: living document, started with Phase 3 (2026-09-26). Audience: whoever si
 | Content snapshots (text, image references) | `post.content`, `media_asset`, `media_object` (object storage) | Publish deterministically; audit what was sent | Post rows until purge; unreferenced media objects pruned after 7 days |
 | Publication results and attempts (provider post ids and URLs, error codes) | `publication`, `publish_attempt` | Status, retries, reconciliation | Until purge; `response_meta` pruned |
 | Audit trail | `audit_log` | Accountability, metering, security | Indefinite; `workspace_id` is nulled at purge so entries are no longer attributable to a tenant |
+| Post metrics (Phase 5) | `publication_metric` | Show performance in Notion and the dashboard, weekly report | 400 days; aggregate numbers only |
 | Campaign mirrors, approvals, short links (Phase 4) | `campaign`, `approval`, `short_link` | Campaign summaries, reviewer sign-off, click counts | Until purge; short links keep aggregate click counts only (no IP, no user agent) |
 | Billing identity | `billing_customer`, `subscription` | Link the Stripe customer and current plan | Until purge (Stripe keeps its own records) |
 | Stripe events | `stripe_event` | Webhook idempotency | Ids and types only, no payload |

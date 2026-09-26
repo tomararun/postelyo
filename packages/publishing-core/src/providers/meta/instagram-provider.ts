@@ -1,6 +1,8 @@
 import type {
   CommentInput,
   CommentResult,
+  MetricsInput,
+  MetricsResult,
   PostSnapshot,
   ProviderCapabilities,
   ProviderContext,
@@ -20,7 +22,7 @@ import {
 } from '../../render.js';
 import { asRecord, classifyNetworkError, parseJson, rawOf, str } from '../shared/graph-errors.js';
 import { mediaUrlFailure } from './facebook-provider.js';
-import { GRAPH_URL, classifyGraph, form, graphComment } from './graph.js';
+import { GRAPH_URL, classifyGraph, form, graphComment, graphGet, insightValues } from './graph.js';
 
 /**
  * Instagram adapter (Phase 2) for professional accounts linked to a Facebook
@@ -61,6 +63,7 @@ export class InstagramProvider implements PublishingProvider {
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: INSTAGRAM_MAX_IMAGE_BYTES,
       firstComment: true,
+      metrics: true,
       imageRequired: true,
       image: {
         delivery: 'url',
@@ -177,6 +180,38 @@ export class InstagramProvider implements PublishingProvider {
       providerPostId: mediaId,
       ...(permalink ? { url: permalink } : {}),
       raw,
+    };
+  }
+
+  /**
+   * Phase 5 metrics: `/{ig-media-id}/insights`. Newer Graph versions replace
+   * `impressions` with `views`; both are requested and the first present wins.
+   */
+  async metrics(input: MetricsInput, ctx: ProviderContext): Promise<MetricsResult> {
+    const id = encodeURIComponent(input.providerPostId);
+    const url = new URL(`${this.graphUrl}/${id}/insights`);
+    url.searchParams.set('metric', 'views,reach,likes,comments,shares,saved');
+    let res = await graphGet(this.fetchImpl, url, ctx, 'Instagram');
+    if (!res.ok && res.result.kind === 'unavailable' && !res.result.retryable) {
+      // Older media / API versions: retry with the legacy impressions metric.
+      const legacy = new URL(`${this.graphUrl}/${id}/insights`);
+      legacy.searchParams.set('metric', 'impressions,reach,likes,comments,shares,saved');
+      res = await graphGet(this.fetchImpl, legacy, ctx, 'Instagram');
+    }
+    if (!res.ok) return res.result;
+    const v = insightValues(res.json);
+    return {
+      kind: 'metrics',
+      metrics: {
+        impressions: v['views'] ?? v['impressions'] ?? null,
+        reach: v['reach'] ?? null,
+        reactions: v['likes'] ?? null,
+        comments: v['comments'] ?? null,
+        shares: v['shares'] ?? null,
+        clicks: null,
+        saves: v['saved'] ?? null,
+      },
+      raw: res.raw,
     };
   }
 

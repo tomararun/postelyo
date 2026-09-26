@@ -45,6 +45,8 @@ export interface InvitationDto {
 }
 
 export interface MemberDto {
+  /** Phase 5: receives the weekly analytics email (owners and admins only). */
+  weeklyReport: boolean;
   userId: string;
   email: string;
   name: string;
@@ -102,11 +104,27 @@ export class InvitationService {
           name: user.name,
           role: membership.role,
           joinedAt: membership.createdAt,
+          weeklyReport: membership.weeklyReport,
         })
         .from(membership)
         .innerJoin(user, eq(user.id, membership.userId))
         .where(eq(membership.workspaceId, ctx.workspaceId))
         .orderBy(membership.createdAt),
+    );
+  }
+
+  /** Phase 5: a member's own notification preference. */
+  async setOwnPreferences(
+    ctx: TenantContext,
+    userId: string,
+    prefs: { weeklyReport?: boolean | undefined },
+  ): Promise<void> {
+    if (prefs.weeklyReport === undefined) return;
+    await withTenantScope(this.deps.db, ctx.workspaceId, (tx) =>
+      tx
+        .update(membership)
+        .set({ weeklyReport: prefs.weeklyReport, updatedAt: this.deps.clock.now() })
+        .where(and(eq(membership.workspaceId, ctx.workspaceId), eq(membership.userId, userId))),
     );
   }
 

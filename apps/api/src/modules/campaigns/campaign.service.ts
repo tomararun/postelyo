@@ -6,6 +6,7 @@ import {
   contentSource,
   post,
   publication,
+  publicationMetric,
   type Campaign,
   type ContentSource,
 } from '../../infra/db/schema.js';
@@ -32,6 +33,9 @@ export interface CampaignSummary {
   scheduled: number;
   published: number;
   failed: number;
+  /** Phase 5: totals of the latest metrics snapshot per published publication (null without data). */
+  impressions: number | null;
+  engagements: number | null;
   nextPublishAt: string | null;
   firstUrl: string | null;
   lastUrl: string | null;
@@ -205,6 +209,7 @@ export class CampaignService {
   async summaryFor(campaignId: string): Promise<CampaignSummary> {
     const rows = await this.deps.db
       .select({
+        id: publication.id,
         state: publication.state,
         scheduledAt: publication.scheduledAt,
         publishedAt: publication.publishedAt,
@@ -225,9 +230,34 @@ export class CampaignService {
       .map((r) => r.scheduledAt)
       .filter((d) => d.getTime() >= now.getTime() - 60_000)
       .sort((a, b) => a.getTime() - b.getTime())[0];
+    // Phase 5: latest snapshot per published publication.
+    let impressions: number | null = null;
+    let engagements: number | null = null;
+    if (published.length > 0) {
+      const snapshots = await this.deps.db
+        .select()
+        .from(publicationMetric)
+        .where(
+          inArray(
+            publicationMetric.publicationId,
+            published.map((p) => p.id),
+          ),
+        )
+        .orderBy(publicationMetric.tier);
+      const latest = new Map<string, (typeof snapshots)[number]>();
+      for (const m of snapshots) latest.set(m.publicationId, m);
+      for (const m of latest.values()) {
+        if (m.impressions !== null) impressions = (impressions ?? 0) + m.impressions;
+        const e = (m.reactions ?? 0) + (m.comments ?? 0) + (m.shares ?? 0);
+        if (m.reactions !== null || m.comments !== null || m.shares !== null)
+          engagements = (engagements ?? 0) + e;
+      }
+    }
     return {
       scheduled: waiting.length,
       published: published.length,
+      impressions,
+      engagements,
       failed: rows.filter((r) => r.state === 'failed' || r.state === 'ambiguous').length,
       nextPublishAt: next ? next.toISOString() : null,
       firstUrl: published.find((p) => p.url)?.url ?? null,
@@ -270,6 +300,9 @@ export class CampaignService {
       const tz = 'UTC';
       const lines = [
         `${summary.published} published, ${summary.scheduled} scheduled, ${summary.failed} failed (${summary.posts} posts).`,
+        summary.impressions !== null || summary.engagements !== null
+          ? `${summary.impressions ?? '—'} impressions, ${summary.engagements ?? '—'} engagements so far.`
+          : '',
         summary.nextPublishAt
           ? `Next publish ${formatLocal(new Date(summary.nextPublishAt), tz)} UTC.`
           : '',

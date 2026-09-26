@@ -1,6 +1,7 @@
 import { PgBoss } from 'pg-boss';
 import type {
   DeleteWorkspaceJobData,
+  MetricsJobData,
   JobEnqueuer,
   PublishJobData,
   SyncPageJobData,
@@ -19,6 +20,8 @@ export const JOB = {
   writeback: 'writeback',
   maintenance: 'maintenance',
   workspaceDelete: 'workspace-delete',
+  /** Phase 5: its own queue so metrics never compete with publishing. */
+  metricsFetch: 'metrics-fetch',
 } as const;
 
 export type JobName = (typeof JOB)[keyof typeof JOB];
@@ -31,6 +34,7 @@ const STATELY_QUEUES: readonly JobName[] = [
   JOB.writeback,
   JOB.notionSyncPage,
   JOB.workspaceDelete,
+  JOB.metricsFetch,
 ];
 
 const ONE_DAY_SECONDS = 24 * 60 * 60;
@@ -97,6 +101,15 @@ export class PgBossEnqueuer implements JobEnqueuer {
       expireInSeconds: 10 * 60,
       // Give the owner a moment to notice a mistake before the purge runs.
       startAfter: new Date(Date.now() + 10 * 60_000),
+    });
+  }
+
+  async fetchMetrics(data: MetricsJobData, opts?: { startAfter?: Date }): Promise<void> {
+    await this.boss.send(JOB.metricsFetch, data, {
+      singletonKey: data.publicationId,
+      retryLimit: 0,
+      expireInSeconds: 5 * 60,
+      ...(opts?.startAfter ? { startAfter: opts.startAfter } : {}),
     });
   }
 

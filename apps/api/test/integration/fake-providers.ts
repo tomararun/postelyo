@@ -261,12 +261,13 @@ export class FakeNotion {
     );
   }
 
-  private databaseKind(databaseId: string): 'content' | 'campaigns' | 'ideas' {
+  private databaseKind(databaseId: string): 'content' | 'campaigns' | 'ideas' | 'analytics' {
     const db = this.createdDatabases.get(databaseId) as
       { title?: { plain_text?: string }[] } | undefined;
     const title = (db?.title?.[0]?.plain_text ?? '').toLowerCase();
     if (title.includes('campaign')) return 'campaigns';
     if (title.includes('idea')) return 'ideas';
+    if (title.includes('analytics')) return 'analytics';
     return 'content';
   }
 
@@ -281,6 +282,42 @@ export class FakeNotion {
 
   private toApiPage(p: FakeNotionPage): Record<string, unknown> {
     const kind = p.databaseId ? this.databaseKind(p.databaseId) : 'content';
+    if (kind === 'analytics') {
+      const x = p.extra;
+      const numberProp = (k: string) => ({
+        type: 'number',
+        number: typeof x[k] === 'number' ? x[k] : null,
+      });
+      return {
+        object: 'page',
+        id: p.id,
+        url: `https://www.notion.so/${p.id.replace(/-/g, '')}`,
+        archived: p.archived,
+        in_trash: false,
+        last_edited_time: p.lastEditedTime,
+        properties: {
+          Name: { type: 'title', title: rt(p.title) },
+          Week: { type: 'date', date: typeof x['Week'] === 'string' ? { start: x['Week'] } : null },
+          Platform: {
+            type: 'select',
+            select: typeof x['Platform'] === 'string' ? { name: x['Platform'] } : null,
+          },
+          Posts: numberProp('Posts'),
+          Impressions: numberProp('Impressions'),
+          Reach: numberProp('Reach'),
+          Reactions: numberProp('Reactions'),
+          Comments: numberProp('Comments'),
+          Shares: numberProp('Shares'),
+          Clicks: numberProp('Clicks'),
+          Saves: numberProp('Saves'),
+          'Engagement Rate': numberProp('Engagement Rate'),
+          'Best Time': {
+            type: 'rich_text',
+            rich_text: rt(typeof x['Best Time'] === 'string' ? x['Best Time'] : ''),
+          },
+        },
+      };
+    }
     if (kind !== 'content') {
       const x = p.extra;
       return {
@@ -700,8 +737,21 @@ export class FakeNotion {
         case 'Postelyo Summary':
           input.extra = { ...(input.extra ?? {}), summary: plainOf(value['rich_text']) };
           break;
-        default:
+        default: {
+          // Phase 5: any other typed value is kept by property name (metric columns, analytics rows).
+          const v =
+            'number' in value
+              ? value['number']
+              : 'date' in value
+                ? ((value['date'] as { start?: string } | null)?.start ?? null)
+                : 'select' in value
+                  ? name(value['select'])
+                  : 'rich_text' in value
+                    ? plainOf(value['rich_text'])
+                    : undefined;
+          if (v !== undefined) input.extra = { ...(input.extra ?? {}), [key]: v };
           break;
+        }
       }
     }
   }
@@ -758,6 +808,8 @@ function imageResponse(path: string): Response {
 export function createFakeProviders() {
   const requests: RecordedRequest[] = [];
   const notion = new FakeNotion();
+  /** Phase 5: every provider metrics call. */
+  const metricsCalls: { provider: string; url: string }[] = [];
   let userinfoStatus = 200;
   let imageInitStatus = 200;
   let organizationsStatus = 200;
@@ -860,6 +912,31 @@ export function createFakeProviders() {
       });
       return new Response('', { status: 201 });
     }
+    // --- LinkedIn metrics (Phase 5) ---
+    if (url.startsWith('https://api.linkedin.com/rest/organizationalEntityShareStatistics')) {
+      metricsCalls.push({ provider: 'linkedin', url });
+      return json(200, {
+        elements: [
+          {
+            totalShareStatistics: {
+              impressionCount: 1200,
+              uniqueImpressionsCount: 900,
+              likeCount: 40,
+              commentCount: 6,
+              shareCount: 3,
+              clickCount: 25,
+            },
+          },
+        ],
+      });
+    }
+    if (url.startsWith('https://api.linkedin.com/rest/socialActions/') && method === 'GET') {
+      metricsCalls.push({ provider: 'linkedin', url });
+      return json(200, {
+        likesSummary: { totalLikes: 12 },
+        commentsSummary: { totalFirstLevelComments: 2, aggregatedTotalComments: 3 },
+      });
+    }
     if (url === 'https://api.linkedin.com/rest/posts') {
       return new Response('', {
         status: 201,
@@ -891,6 +968,24 @@ export function createFakeProviders() {
       }
       return json(400, { error: 'invalid_request', error_description: 'bad code' });
     }
+    // --- X metrics (Phase 5) ---
+    if (/^https:\/\/api\.x\.com\/2\/tweets\/[^/?]+\?/.test(url) && method === 'GET') {
+      metricsCalls.push({ provider: 'x', url });
+      return json(200, {
+        data: {
+          id: url.split('/tweets/')[1]!.split('?')[0],
+          public_metrics: {
+            retweet_count: 4,
+            reply_count: 3,
+            like_count: 30,
+            quote_count: 1,
+            bookmark_count: 2,
+            impression_count: 2500,
+          },
+          non_public_metrics: { url_link_clicks: 40, user_profile_clicks: 7 },
+        },
+      });
+    }
     if (url.startsWith('https://api.x.com/2/users/me')) {
       return json(200, {
         data: {
@@ -900,6 +995,41 @@ export function createFakeProviders() {
           profile_image_url: 'https://media.example/alice.jpg',
         },
       });
+    }
+
+    // --- Meta metrics (Phase 5) ---
+    if (
+      /^https:\/\/graph\.facebook\.com\/v21\.0\/[^/]+\/insights\?/.test(url) &&
+      method === 'GET'
+    ) {
+      metricsCalls.push({ provider: 'meta', url });
+      const metric = new URL(url).searchParams.get('metric') ?? '';
+      if (metric.includes('post_impressions')) {
+        return json(200, {
+          data: [
+            { name: 'post_impressions', values: [{ value: 800 }] },
+            { name: 'post_impressions_unique', values: [{ value: 600 }] },
+            { name: 'post_clicks', values: [{ value: 20 }] },
+            { name: 'post_reactions_by_type_total', values: [{ value: { like: 15, love: 5 } }] },
+          ],
+        });
+      }
+      return json(200, {
+        data: [
+          { name: 'views', values: [{ value: 1500 }] },
+          { name: 'reach', values: [{ value: 1100 }] },
+          { name: 'likes', values: [{ value: 90 }] },
+          { name: 'comments', values: [{ value: 8 }] },
+          { name: 'shares', values: [{ value: 4 }] },
+          { name: 'saved', values: [{ value: 11 }] },
+        ],
+      });
+    }
+    if (
+      /^https:\/\/graph\.facebook\.com\/v21\.0\/[^/]+\?fields=shares/.test(url) &&
+      method === 'GET'
+    ) {
+      return json(200, { shares: { count: 9 }, comments: { summary: { total_count: 5 } } });
     }
 
     // --- Meta (Facebook Login) ---
@@ -986,6 +1116,7 @@ export function createFakeProviders() {
     fetchImpl,
     requests,
     notion,
+    metricsCalls,
     linkedInUploads,
     setUserinfoStatus: (s: number) => {
       userinfoStatus = s;

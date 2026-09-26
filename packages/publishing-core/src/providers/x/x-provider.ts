@@ -1,6 +1,8 @@
 import type {
   CommentInput,
   CommentResult,
+  MetricsInput,
+  MetricsResult,
   LoadedMedia,
   PostSnapshot,
   ProviderCapabilities,
@@ -68,6 +70,7 @@ export class XProvider implements PublishingProvider {
       supportedImageMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
       maxImageBytes: X_MAX_IMAGE_BYTES,
       firstComment: true,
+      metrics: true,
       image: { delivery: 'upload' },
     };
   }
@@ -211,6 +214,71 @@ export class XProvider implements PublishingProvider {
     }
     await input.onMediaUploaded?.(media.assetId, id, loaded.contentHash);
     return { ok: true, value: id };
+  }
+
+  /**
+   * Phase 5 metrics: `GET /2/tweets/:id` with public and non-public metrics.
+   * Non-public metrics (link clicks) need the user context of the tweet's
+   * owner, which is how Postelyo publishes, and are only kept for 30 days.
+   */
+  async metrics(input: MetricsInput, ctx: ProviderContext): Promise<MetricsResult> {
+    const u = new URL(`${X_TWEETS_URL}/${encodeURIComponent(input.providerPostId)}`);
+    u.searchParams.set('tweet.fields', 'public_metrics,non_public_metrics');
+    let res: Response;
+    try {
+      res = await this.fetchImpl(u.toString(), {
+        method: 'GET',
+        headers: this.headers(ctx, { accept: 'application/json' }),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      });
+    } catch (err) {
+      return {
+        kind: 'unavailable',
+        reason: `X unreachable: ${(err as Error).message}`,
+        retryable: true,
+      };
+    }
+    const text = await res.text().catch(() => '');
+    const raw = rawOf(res.status, text);
+    if (!res.ok) {
+      const ra = Number(res.headers.get('retry-after'));
+      return {
+        kind: 'unavailable',
+        reason: `X metrics failed (${res.status}): ${messageOf(text)}`,
+        retryable: res.status === 429 || res.status >= 500,
+        ...(res.status === 429
+          ? { retryAfterMs: Number.isFinite(ra) && ra > 0 ? ra * 1000 : 15 * 60_000 }
+          : {}),
+        raw,
+      };
+    }
+    const data = asRecord(parseJson(text)['data']);
+    if (Object.keys(data).length === 0) {
+      return {
+        kind: 'unavailable',
+        reason: 'X did not return the tweet (deleted?)',
+        retryable: false,
+        raw,
+      };
+    }
+    const pub = asRecord(data['public_metrics']);
+    const priv = asRecord(data['non_public_metrics']);
+    const n = (o: Record<string, unknown>, k: string) => (typeof o[k] === 'number' ? o[k] : null);
+    const retweets = n(pub, 'retweet_count');
+    const quotes = n(pub, 'quote_count');
+    return {
+      kind: 'metrics',
+      metrics: {
+        impressions: n(pub, 'impression_count') ?? n(priv, 'impression_count'),
+        reach: null,
+        reactions: n(pub, 'like_count'),
+        comments: n(pub, 'reply_count'),
+        shares: retweets === null && quotes === null ? null : (retweets ?? 0) + (quotes ?? 0),
+        clicks: n(priv, 'url_link_clicks'),
+        saves: n(pub, 'bookmark_count'),
+      },
+      raw,
+    };
   }
 
   /** First comment on X is a reply to the published tweet. */

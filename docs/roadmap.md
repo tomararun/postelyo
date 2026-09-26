@@ -99,13 +99,28 @@ Deferred: best-time suggestions (Phase 5 analytics), bulk CSV import (Notion-nat
 
 ---
 
+## Phase 5 – Analytics back into Notion (built 2026-09-26)
+
+Goal: results live next to the content. Product plan: [product-roadmap.md](./product-roadmap.md) Phase 5.
+
+| Item | Notes | Hook | Status |
+|------|-------|------|--------|
+| Provider metrics capability | `metrics()` + contract test; LinkedIn (org statistics, member social actions), X, Facebook Pages, Instagram, fake; fields per provider documented | `PublishingProvider.metrics` | Done · live values need the platform permissions |
+| Fetch schedule on its own queue | Tiers 1 h/6 h/24 h/7 d/30 d, `publication_metric` per tier, `metrics-fetch` queue, hourly budget, bounded retries, backfill, 400-day retention | §7.5 | Done |
+| Writeback | Per-post metric columns; `Postelyo Analytics` database with weekly/platform rows and best times, idempotent | template columns | Done |
+| Weekly report | Monday 08:00 local to owners/admins, opt-out per membership | `membership.weekly_report` | Done |
+| Dashboard | `/analytics` with SVG weekly chart, top posts, hashtags, best times; publication detail history | `GET …/analytics` | Done |
+
+Deferred: metrics for Postelyo's own first comments, follower counts and audience demographics, cross-platform attribution.
+
+---
+
 ## Later – Intelligence and growth
 
 | Item | Notes | Hook |
 |------|-------|------|
 | AI content generation | Draft from an idea/brief; human-in-the-loop | Produces canonical content |
 | AI platform adaptation | Per-publication `content_override` generated before render | `publication.content_override` |
-| Analytics | Metrics fetch jobs per provider; `publication_metrics` time series; dashboards | `provider_post_id` |
 | Campaigns | Group posts, campaign-level scheduling and reporting | New `campaign` table, `post.campaign_id` |
 | Public API + outbound webhooks | API keys, `Idempotency-Key`, signed webhooks from the audit stream | §11.2, §14 |
 | Scale-out | Redis/BullMQ or SQS if Postgres queue saturates; audit partitioning; regional deployments | §20 |

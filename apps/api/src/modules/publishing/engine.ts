@@ -49,6 +49,8 @@ export interface PublishEngineDeps {
   random?: () => number;
   /** Phase 4: UTM presets and short links applied at render time. */
   links?: LinkService;
+  /** Phase 5: called after a successful publish to start the metrics schedule. */
+  onPublished?: (pub: Publication) => Promise<void>;
 }
 
 /** First comments are retried this many times (immediately, then by maintenance). */
@@ -289,6 +291,18 @@ export class PublishEngine {
     const outcome = await this.finish(ctx, leased, attemptId, result);
     if (outcome === 'published' && result.kind === 'published') {
       await this.postFirstComment(leased.id, correlationId);
+      if (this.deps.onPublished) {
+        const [fresh] = await db
+          .select()
+          .from(publication)
+          .where(eq(publication.id, leased.id))
+          .limit(1);
+        if (fresh) {
+          await this.deps.onPublished(fresh).catch((err: unknown) => {
+            this.deps.logger.warn({ err, publicationId: leased.id }, 'post-publish hook failed');
+          });
+        }
+      }
     }
     return outcome;
   }

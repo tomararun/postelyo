@@ -26,6 +26,19 @@ interface Detail {
   firstCommentId: string | null;
   firstCommentError: string | null;
   links: { shown: string; target: string; clicks: number }[];
+  metrics: {
+    tier: string;
+    fetchedAt: string;
+    impressions: number | null;
+    reach: number | null;
+    reactions: number | null;
+    comments: number | null;
+    shares: number | null;
+    clicks: number | null;
+    saves: number | null;
+  }[];
+  metricsNextAt: string | null;
+  metricsError: string | null;
   attempts: {
     cycleNo: number;
     attemptNo: number;
@@ -191,6 +204,51 @@ export default async function PublicationPage({
             <Input name="providerPostUrl" label="Post URL (if published)" type="url" />
             <Button>Resolve</Button>
           </form>
+        </Card>
+      )}
+      {(pub.metrics.length > 0 || pub.metricsNextAt || pub.metricsError) && (
+        <Card title="Performance">
+          {pub.metrics.length === 0 ? (
+            <p className="text-sm text-[var(--muted)]">
+              {pub.metricsError
+                ? `Metrics unavailable: ${pub.metricsError}`
+                : `First numbers arrive about an hour after publishing (next check ${fmt(pub.metricsNextAt)}).`}
+            </p>
+          ) : (
+            <Table
+              head={[
+                'After',
+                'Impressions',
+                'Reach',
+                'Reactions',
+                'Comments',
+                'Shares',
+                'Clicks',
+                'Saves',
+                'Fetched',
+              ]}
+            >
+              {pub.metrics.map((m) => (
+                <tr key={m.tier}>
+                  <td className="py-1 pr-3">{m.tier}</td>
+                  <td className="py-1 pr-3">{m.impressions ?? '—'}</td>
+                  <td className="py-1 pr-3">{m.reach ?? '—'}</td>
+                  <td className="py-1 pr-3">{m.reactions ?? '—'}</td>
+                  <td className="py-1 pr-3">{m.comments ?? '—'}</td>
+                  <td className="py-1 pr-3">{m.shares ?? '—'}</td>
+                  <td className="py-1 pr-3">{m.clicks ?? '—'}</td>
+                  <td className="py-1 pr-3">{m.saves ?? '—'}</td>
+                  <td className="py-1 text-xs text-[var(--muted)]">{fmt(m.fetchedAt)}</td>
+                </tr>
+              ))}
+            </Table>
+          )}
+          {pub.metrics.length > 0 && pub.metricsNextAt && (
+            <p className="mt-2 text-xs text-[var(--muted)]">Next check {fmt(pub.metricsNextAt)}.</p>
+          )}
+          {pub.metrics.length > 0 && pub.metricsError && (
+            <p className="mt-2 text-xs text-[var(--danger)]">{pub.metricsError}</p>
+          )}
         </Card>
       )}
       <Card title="Attempts">

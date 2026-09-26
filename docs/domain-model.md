@@ -363,6 +363,21 @@ Effective plan = `plan` while `active`/`trialing`, or while `past_due` before `g
 
 `post`: `parent_post_id` (source page of a generated instance), `series_key` (UNIQUE per source: `<page>:<date>` or `evergreen:<instant>`), `series_fp` (text fingerprint the instance was generated with), `series_source_hash` (content hash last propagated), `repeat_rule` (`weekly`, `biweekly`, `monthly`, `evergreen`), `repeat_until`, `approval_fp` (fingerprint a reviewer would approve now). `publication`: `first_comment_state` (null, `pending`, `posting`, `posted`, `failed`), `first_comment_id`, `first_comment_error`, `first_comment_attempts`. `workspace.settings` gains `links`, `evergreen`, `approval`.
 
+### 2.18 `publication_metric` (Phase 5)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS |
+| publication_id | uuid FK | Cascades with the publication |
+| provider | enum | |
+| tier | integer | 0–4 = 1 h, 6 h, 24 h, 7 d, 30 d after publish; UNIQUE with `publication_id` |
+| fetched_at | timestamptz | Pruned after 400 days |
+| impressions, reach, reactions, comments, shares, clicks, saves | integer null | Null when the platform does not expose the field |
+| raw | jsonb | Truncated provider payload |
+
+Phase 5 columns on existing tables: `publication.metrics_tier` (completed tiers), `metrics_next_at`, `metrics_fetched_at`, `metrics_attempts`, `metrics_error`; `membership.weekly_report` (default true); `workspace.settings.weeklyReportLastWeek`; `content_source.config.analyticsDatabaseId`, `analyticsPropertyMap`, `analyticsRows`, `analyticsRowHashes`, `analyticsWrittenAt`.
+
 ### 2.13 Queue tables
 
 Owned by pg-boss in its own schema (`pgboss`). Not part of the domain; never queried by domain code.

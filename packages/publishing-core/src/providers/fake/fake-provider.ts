@@ -3,6 +3,8 @@ import type {
   CommentInput,
   CommentResult,
   LoadedMedia,
+  MetricsInput,
+  MetricsResult,
   MediaUrl,
   PostSnapshot,
   ProviderCapabilities,
@@ -28,6 +30,8 @@ export interface FakeProviderOptions {
   renderAs?: string;
   /** Phase 4: decide the outcome of `comment()` per call; posted when absent. */
   commentDecide?: (input: CommentInput, callNo: number) => CommentResult;
+  /** Phase 5: decide `metrics()` per call; growing numbers when absent. */
+  metricsDecide?: (input: MetricsInput, callNo: number) => MetricsResult;
 }
 
 export interface FakeCall {
@@ -54,6 +58,10 @@ export class FakeProvider implements PublishingProvider {
   lookupError: Error | null = null;
   /** Phase 4: every first comment the fake was asked to post. */
   readonly comments: { input: CommentInput; result: CommentResult }[] = [];
+  /** Phase 5: every metrics fetch, in order. */
+  readonly metricCalls: { input: MetricsInput; result: MetricsResult }[] = [];
+  /** Phase 5: replaces the default decision for `metrics()` at runtime (tests). */
+  metricsDecide: ((input: MetricsInput, callNo: number) => MetricsResult) | null = null;
   private readonly script: PublishResult[];
   private seq = 0;
 
@@ -99,8 +107,31 @@ export class FakeProvider implements PublishingProvider {
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: 8 * 1024 * 1024,
       firstComment: true,
+      metrics: true,
       ...this.opts.capabilities,
     };
+  }
+
+  async metrics(input: MetricsInput, _ctx: ProviderContext): Promise<MetricsResult> {
+    const n =
+      this.metricCalls.filter((c) => c.input.publicationId === input.publicationId).length + 1;
+    const decide = this.metricsDecide ?? this.opts.metricsDecide;
+    const result: MetricsResult = decide
+      ? decide(input, this.metricCalls.length)
+      : {
+          kind: 'metrics',
+          metrics: {
+            impressions: 100 * n,
+            reach: 80 * n,
+            reactions: 10 * n,
+            comments: 2 * n,
+            shares: n,
+            clicks: 5 * n,
+            saves: null,
+          },
+        };
+    this.metricCalls.push({ input, result });
+    return result;
   }
 
   async comment(input: CommentInput, _ctx: ProviderContext): Promise<CommentResult> {

@@ -113,6 +113,19 @@ export async function updateWorkspace(workspaceId: string, formData: FormData): 
   redirect(back(path, { notice: 'Settings saved.' }));
 }
 
+export async function setWeeklyReport(workspaceId: string, formData: FormData): Promise<void> {
+  const path = `/w/${workspaceId}/settings`;
+  try {
+    await api(`/v1/workspaces/${workspaceId}/members/me`, {
+      method: 'PATCH',
+      body: { weeklyReport: formData.get('weeklyReport') === 'on' },
+    });
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(back(path, { notice: 'Preference saved.' }));
+}
+
 export async function approvePost(workspaceId: string, postId: string): Promise<void> {
   const path = `/w/${workspaceId}/posts`;
   try {

@@ -7,6 +7,7 @@ import {
   post,
   publication,
   socialAccount,
+  workerHeartbeat,
 } from '../../src/infra/db/schema.js';
 import { NOTION_GOOD_DB, NOTION_VALID_TOKEN, createFakeProviders } from './fake-providers.js';
 import { createTestStack, uniqueEmail, type TestStack } from './helpers.js';
@@ -184,6 +185,8 @@ describe('ops: alerts, token lifecycle, digest, metrics, operator pages', () => 
   });
 
   it('the api-side heartbeat check alerts only when the worker is stale', async () => {
+    // Other suites (preflight) may have left a fresh heartbeat; this check starts from nothing.
+    await stack.db.db.delete(workerHeartbeat);
     expect(await stack.services.alerts.evaluateHeartbeat('h0')).toBe('unknown');
     await stack.services.heartbeat.beat('worker-1', new Date(), 'test');
     expect(await stack.services.alerts.evaluateHeartbeat('h1')).toBe('ok');

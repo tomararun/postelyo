@@ -65,9 +65,24 @@ Postelyo finds the campaigns database through the `Campaign` relation of the con
 
 Postelyo finds the ideas database by its title (`Postelyo Ideas`) or from the setup wizard's choice.
 
+## Analytics database (Phase 5, optional)
+
+| Property | Type | Owner | Notes |
+|----------|------|-------|-------|
+| `Name` | title | Postelyo | `2026-W40 · LinkedIn`, or `Best times to publish`. |
+| `Week` | date | Postelyo | Monday of the ISO week. |
+| `Platform` | select | Postelyo | `LinkedIn`, `LinkedIn Page`, `X`, `Facebook Page`, `Instagram`, `All`. |
+| `Posts`, `Impressions`, `Reach`, `Reactions`, `Comments`, `Shares`, `Clicks`, `Saves` | number | Postelyo | Totals of the latest snapshot per post published that week. |
+| `Engagement Rate` | number (percent) | Postelyo | (reactions + comments + shares) / impressions. |
+| `Best Time` | rich text | Postelyo | Filled on the `Best times to publish` row. |
+
+Postelyo finds it by its title (`Postelyo Analytics`). Rows for the last eight weeks are refreshed hourly when numbers change.
+
+Per-post metrics land in the content database when these optional columns exist: `Impressions`, `Reach`, `Reactions`, `Comments`, `Shares`, `Clicks` (number) and `Metrics Updated` (date). Numbers are fetched 1 hour, 6 hours, 24 hours, 7 days and 30 days after publishing; a field a platform does not report stays empty.
+
 ## Upgrading a v1 database
 
-Everything in v2 is additive. To upgrade by hand: add the properties `Repeat` (select: Weekly, Every 2 weeks, Monthly, Evergreen), `Repeat Until` (date), `First Comment` (rich text), `Approval` (select), `Link Report` (rich text), `Repeat Of` (relation to the same database, one-way) and, if you want campaigns, `Campaign` (relation to a campaigns database with the columns above). Reconnect or run *Sync now*; the property map refreshes on connect. Nothing changes for pages that do not use the new columns.
+Everything in v2 (and the Phase 5 metric columns) is additive. To upgrade by hand: add the metric columns above and the properties `Repeat` (select: Weekly, Every 2 weeks, Monthly, Evergreen), `Repeat Until` (date), `First Comment` (rich text), `Approval` (select), `Link Report` (rich text), `Repeat Of` (relation to the same database, one-way) and, if you want campaigns, `Campaign` (relation to a campaigns database with the columns above). Reconnect or run *Sync now*; the property map refreshes on connect. Nothing changes for pages that do not use the new columns.
 
 ## Page body formatting
 

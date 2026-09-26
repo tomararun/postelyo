@@ -2,6 +2,8 @@ import type {
   CommentInput,
   CommentResult,
   LoadedMedia,
+  MetricsInput,
+  MetricsResult,
   PostSnapshot,
   ProviderCapabilities,
   ProviderContext,
@@ -31,6 +33,9 @@ import { renderLittleText, unescapeLittleText } from './little-text.js';
 export const LINKEDIN_POSTS_URL = 'https://api.linkedin.com/rest/posts';
 /** Default wait when LinkedIn throttles without a Retry-After header. */
 export const LINKEDIN_RATE_LIMIT_WAIT_MS = 15 * 60_000;
+/** Organization post statistics (Phase 5): `organizationalEntityShareStatistics` (Community Management API). */
+export const LINKEDIN_SHARE_STATS_URL =
+  'https://api.linkedin.com/rest/organizationalEntityShareStatistics';
 /** Comments on a post (Phase 4 first comment): `/rest/socialActions/{postUrn}/comments`. */
 export const LINKEDIN_SOCIAL_ACTIONS_URL = 'https://api.linkedin.com/rest/socialActions';
 export const LINKEDIN_IMAGES_INIT_URL =
@@ -64,6 +69,7 @@ export class LinkedInProvider implements PublishingProvider {
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: LINKEDIN_MAX_IMAGE_BYTES,
       firstComment: true,
+      metrics: true,
     };
   }
 
@@ -363,6 +369,109 @@ export class LinkedInProvider implements PublishingProvider {
     }
     await input.onMediaUploaded?.(media.assetId, imageUrn, loaded.contentHash);
     return { ok: true, value: imageUrn };
+  }
+
+  /**
+   * Phase 5 metrics. Organization posts: share statistics (impressions, clicks,
+   * likes, comments, shares) through the Community Management API. Member
+   * posts: the social actions summary gives reactions and comments; member
+   * impressions need the separate `r_member_postAnalytics` product and are
+   * reported as null until that scope is granted. Verify against current docs.
+   */
+  async metrics(input: MetricsInput, ctx: ProviderContext): Promise<MetricsResult> {
+    const postUrn = input.providerPostId;
+    let res: Response;
+    try {
+      if (input.account.accountType === 'organization') {
+        const u = new URL(LINKEDIN_SHARE_STATS_URL);
+        u.searchParams.set('q', 'organizationalEntity');
+        u.searchParams.set('organizationalEntity', authorUrn(input.account));
+        u.searchParams.set(
+          postUrn.includes(':ugcPost:') ? 'ugcPosts' : 'shares',
+          `List(${postUrn})`,
+        );
+        res = await this.fetchImpl(u.toString(), {
+          method: 'GET',
+          headers: this.headers(ctx, { accept: 'application/json' }),
+          ...(ctx.signal ? { signal: ctx.signal } : {}),
+        });
+      } else {
+        res = await this.fetchImpl(
+          `${LINKEDIN_SOCIAL_ACTIONS_URL}/${encodeURIComponent(postUrn)}`,
+          {
+            method: 'GET',
+            headers: this.headers(ctx, { accept: 'application/json' }),
+            ...(ctx.signal ? { signal: ctx.signal } : {}),
+          },
+        );
+      }
+    } catch (err) {
+      return {
+        kind: 'unavailable',
+        reason: `LinkedIn unreachable: ${(err as Error).message}`,
+        retryable: true,
+      };
+    }
+    const text = await res.text().catch(() => '');
+    const raw = { status: res.status, body: text.slice(0, 2000) };
+    if (!res.ok) {
+      const retryable = res.status === 429 || res.status >= 500;
+      const permission = res.status === 403 || res.status === 401;
+      return {
+        kind: 'unavailable',
+        reason: `LinkedIn metrics ${permission ? 'not permitted' : 'failed'} (${statusLabel(res)}): ${messageFromBody(text) ?? 'no details'}`,
+        retryable,
+        ...(res.status === 429 ? { retryAfterMs: LINKEDIN_RATE_LIMIT_WAIT_MS } : {}),
+        raw,
+      };
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      return {
+        kind: 'unavailable',
+        reason: 'LinkedIn metrics returned malformed JSON',
+        retryable: true,
+        raw,
+      };
+    }
+    const num = (o: Record<string, unknown>, k: string) =>
+      typeof o[k] === 'number' && Number.isFinite(o[k]) ? o[k] : null;
+    if (input.account.accountType === 'organization') {
+      const elements = Array.isArray(parsed['elements']) ? parsed['elements'] : [];
+      const first = (elements[0] ?? {}) as Record<string, unknown>;
+      const stats = (first['totalShareStatistics'] ?? {}) as Record<string, unknown>;
+      return {
+        kind: 'metrics',
+        metrics: {
+          impressions: num(stats, 'impressionCount'),
+          reach: num(stats, 'uniqueImpressionsCount'),
+          reactions: num(stats, 'likeCount'),
+          comments: num(stats, 'commentCount'),
+          shares: num(stats, 'shareCount'),
+          clicks: num(stats, 'clickCount'),
+          saves: null,
+        },
+        raw,
+      };
+    }
+    const likes = (parsed['likesSummary'] ?? {}) as Record<string, unknown>;
+    const comments = (parsed['commentsSummary'] ?? {}) as Record<string, unknown>;
+    return {
+      kind: 'metrics',
+      metrics: {
+        impressions: null,
+        reach: null,
+        reactions: num(likes, 'totalLikes'),
+        comments:
+          num(comments, 'totalFirstLevelComments') ?? num(comments, 'aggregatedTotalComments'),
+        shares: null,
+        clicks: null,
+        saves: null,
+      },
+      raw,
+    };
   }
 
   /** First comment: posted by the same author under the freshly created post. */

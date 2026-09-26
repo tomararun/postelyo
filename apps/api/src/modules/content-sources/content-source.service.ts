@@ -14,12 +14,14 @@ import {
   type NotionSearchResult,
 } from './notion/notion-client.js';
 import {
+  ANALYTICS_TITLE,
   CAMPAIGNS_TITLE,
   IDEAS_TITLE,
   TEMPLATE_TITLE,
   createTemplateSuite,
 } from './notion/notion-template.js';
 import {
+  ANALYTICS_CONTRACT,
   CAMPAIGN_CONTRACT,
   IDEAS_CONTRACT,
   parseNotionDatabaseId,
@@ -57,6 +59,8 @@ export interface ContentSourceDto {
   templateVersion: 1 | 2;
   campaignsDatabaseId: string | null;
   ideasDatabaseId: string | null;
+  /** Phase 5 */
+  analyticsDatabaseId: string | null;
 }
 
 interface NotionSourceConfig {
@@ -79,6 +83,12 @@ interface NotionSourceConfig {
   ideasPropertyMap?: Record<string, string>;
   /** 2 when the `Repeat`/`Campaign`/`First Comment` columns exist. */
   templateVersion?: 1 | 2;
+  /** Phase 5: analytics rollup database and the rows written so far (key → page id, hash). */
+  analyticsDatabaseId?: string | null;
+  analyticsPropertyMap?: Record<string, string>;
+  analyticsRows?: Record<string, string>;
+  analyticsRowHashes?: Record<string, string>;
+  analyticsWrittenAt?: string;
 }
 
 export function toContentSourceDto(s: ContentSource): ContentSourceDto {
@@ -100,6 +110,7 @@ export function toContentSourceDto(s: ContentSource): ContentSourceDto {
     templateVersion: cfg.templateVersion ?? 1,
     campaignsDatabaseId: cfg.campaignsDatabaseId ?? null,
     ideasDatabaseId: cfg.ideasDatabaseId ?? null,
+    analyticsDatabaseId: cfg.analyticsDatabaseId ?? null,
   };
 }
 
@@ -117,6 +128,8 @@ async function companionDatabases(
     | 'ideasDatabaseId'
     | 'ideasPropertyMap'
     | 'templateVersion'
+    | 'analyticsDatabaseId'
+    | 'analyticsPropertyMap'
   >
 > {
   const out: Pick<
@@ -126,9 +139,12 @@ async function companionDatabases(
     | 'ideasDatabaseId'
     | 'ideasPropertyMap'
     | 'templateVersion'
+    | 'analyticsDatabaseId'
+    | 'analyticsPropertyMap'
   > = {
     campaignsDatabaseId: null,
     ideasDatabaseId: null,
+    analyticsDatabaseId: null,
     templateVersion: propertyMap['Repeat'] || propertyMap['First Comment'] ? 2 : 1,
   };
   const campaignProp = propertyMap['Campaign'] ? db.properties[propertyMap['Campaign']] : undefined;
@@ -145,14 +161,30 @@ async function companionDatabases(
     }
   }
   let ideasId = explicitIdeasId;
-  if (!ideasId) {
+  let analyticsId: string | null = null;
+  {
     try {
-      const found = (await client.search('database')).find(
-        (d) => d.title.trim().toLowerCase() === IDEAS_TITLE.toLowerCase(),
-      );
-      ideasId = found?.id ?? null;
+      const found = await client.search('database');
+      if (!ideasId)
+        ideasId =
+          found.find((d) => d.title.trim().toLowerCase() === IDEAS_TITLE.toLowerCase())?.id ?? null;
+      analyticsId =
+        found.find((d) => d.title.trim().toLowerCase() === ANALYTICS_TITLE.toLowerCase())?.id ??
+        null;
     } catch {
-      ideasId = null;
+      ideasId ??= null;
+    }
+  }
+  if (analyticsId) {
+    try {
+      const adb = await client.retrieveDatabase(analyticsId);
+      const v = validateNotionDatabase(adb, ANALYTICS_CONTRACT);
+      if (v.ok) {
+        out.analyticsDatabaseId = adb.id;
+        out.analyticsPropertyMap = v.propertyMap;
+      }
+    } catch {
+      // Analytics rollups are optional.
     }
   }
   if (ideasId) {

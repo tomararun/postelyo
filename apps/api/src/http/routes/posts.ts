@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
+import type { AnalyticsQueryService } from '../../modules/analytics/analytics-query.service.js';
 import type { CampaignService } from '../../modules/campaigns/campaign.service.js';
 import { ApprovalError, type ApprovalService } from '../../modules/posts/approval.service.js';
 import type { PostQueryService } from '../../modules/posts/post-query.service.js';
@@ -12,6 +13,8 @@ export interface PostRoutesOptions {
   /** Phase 4 */
   approvals?: ApprovalService;
   campaigns?: CampaignService;
+  /** Phase 5 */
+  analytics?: AnalyticsQueryService;
 }
 
 function problem(
@@ -40,6 +43,15 @@ export const postRoutes: FastifyPluginAsync<PostRoutesOptions> = async (app, opt
   app.get('/v1/workspaces/:workspaceId/campaigns', { preHandler: viewer }, async (req) => ({
     campaigns: opts.campaigns ? await opts.campaigns.list(req.tenant!) : [],
   }));
+
+  // Phase 5: analytics summary for the dashboard (weekly rollups, top posts, hashtags, best times).
+  app.get('/v1/workspaces/:workspaceId/analytics', { preHandler: viewer }, async (req, reply) => {
+    if (!opts.analytics) return problem(reply, req, 404, 'Not Found');
+    const q = req.query as { weeks?: string };
+    const weeks = Math.min(26, Math.max(1, Number(q.weeks ?? '8') || 8));
+    const ws = await opts.workspaces.get(req.tenant!);
+    return opts.analytics.summary(req.tenant!.workspaceId, ws.defaultTimezone, weeks);
+  });
 
   app.get('/v1/workspaces/:workspaceId/approvals', { preHandler: viewer }, async (req) => ({
     pending: opts.approvals ? await opts.approvals.pending(req.tenant!) : [],

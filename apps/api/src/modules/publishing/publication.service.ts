@@ -5,6 +5,7 @@ import {
   publication,
   publishAttempt,
   type Publication,
+  type PublicationMetric,
   type PublishAttempt,
 } from '../../infra/db/schema.js';
 import { withTenantScope } from '../../infra/db/tenant-scope.js';
@@ -15,6 +16,8 @@ import { assertPublicationTransition } from '../posts/state-machine.js';
 import type { TenantContext } from '../tenancy/tenant-context.js';
 import type { JobEnqueuer } from './jobs.js';
 import type { LinkService } from '../links/link.service.js';
+import type { PostMetricsService } from '../analytics/metrics.service.js';
+import type { PostMetrics } from './provider.js';
 
 export class PublicationError extends Error {
   constructor(
@@ -52,6 +55,11 @@ export interface PublicationDto {
   firstCommentId: string | null;
   firstCommentError: string | null;
   links: { shown: string; target: string; clicks: number }[];
+  /** Phase 5: latest snapshot and the per-tier history. */
+  metrics: (PostMetrics & { tier: string; fetchedAt: Date })[];
+  metricsTier: number;
+  metricsNextAt: Date | null;
+  metricsError: string | null;
   attempts: {
     attemptNo: number;
     cycleNo: number;
@@ -81,6 +89,8 @@ export class PublicationService {
     private readonly enqueue: JobEnqueuer,
     private readonly clock: Clock,
     private readonly links?: LinkService,
+    /** Lazy: the metrics service is built after the publication service. */
+    private readonly metrics?: () => PostMetricsService,
   ) {}
 
   async get(ctx: TenantContext, id: string): Promise<PublicationDto | null> {
@@ -103,7 +113,8 @@ export class PublicationService {
             clicks: l.clicks,
           }))
         : [];
-      return toDto(row, attempts, links);
+      const history = this.metrics ? await this.metrics().historyFor(id) : [];
+      return toDto(row, attempts, links, history);
     });
   }
 
@@ -238,10 +249,13 @@ export class PublicationService {
   }
 }
 
+const TIER_LABELS = ['1h', '6h', '24h', '7d', '30d'];
+
 function toDto(
   p: Publication,
   attempts: PublishAttempt[],
   links: PublicationDto['links'] = [],
+  history: PublicationMetric[] = [],
 ): PublicationDto {
   return {
     id: p.id,
@@ -268,6 +282,20 @@ function toDto(
     firstCommentId: p.firstCommentId,
     firstCommentError: p.firstCommentError,
     links,
+    metrics: history.map((m) => ({
+      tier: TIER_LABELS[m.tier] ?? String(m.tier),
+      fetchedAt: m.fetchedAt,
+      impressions: m.impressions,
+      reach: m.reach,
+      reactions: m.reactions,
+      comments: m.comments,
+      shares: m.shares,
+      clicks: m.clicks,
+      saves: m.saves,
+    })),
+    metricsTier: p.metricsTier,
+    metricsNextAt: p.metricsNextAt,
+    metricsError: p.metricsError,
     attempts: attempts.map((a) => ({
       attemptNo: a.attemptNo,
       cycleNo: a.cycleNo,

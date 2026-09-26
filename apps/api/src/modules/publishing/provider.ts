@@ -2,6 +2,9 @@
 export type {
   AccountType,
   LoadedMedia,
+  MetricsInput,
+  MetricsResult,
+  PostMetrics,
   ProviderCapabilities,
   ProviderContext,
   ProviderCredentials,

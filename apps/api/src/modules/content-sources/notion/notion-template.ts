@@ -16,6 +16,7 @@ import { NOTION_CONTRACT } from './notion-schema.js';
 export const TEMPLATE_TITLE = 'Postelyo Content';
 export const CAMPAIGNS_TITLE = 'Postelyo Campaigns';
 export const IDEAS_TITLE = 'Postelyo Ideas';
+export const ANALYTICS_TITLE = 'Postelyo Analytics';
 
 export const STATUS_OPTIONS = [
   { name: 'Idea', color: 'gray' },
@@ -96,6 +97,14 @@ export function templateProperties(): Record<string, unknown> {
     'First Comment': { rich_text: {} },
     Approval: { select: { options: [...APPROVAL_OPTIONS] } },
     'Link Report': { rich_text: {} },
+    // Phase 5 metrics
+    Impressions: { number: {} },
+    Reach: { number: {} },
+    Reactions: { number: {} },
+    Comments: { number: {} },
+    Shares: { number: {} },
+    Clicks: { number: {} },
+    'Metrics Updated': { date: {} },
     // System
     'Postelyo Status': { select: { options: [...POSTELYO_STATUS_OPTIONS] } },
     'Postelyo Note': { rich_text: {} },
@@ -132,6 +141,31 @@ export function campaignsProperties(): Record<string, unknown> {
     'Next Publish': { date: {} },
     'Postelyo Summary': { rich_text: {} },
   };
+}
+
+export function analyticsProperties(): Record<string, unknown> {
+  return {
+    Name: { title: {} },
+    Week: { date: {} },
+    Platform: { select: { options: [...PLATFORM_OPTIONS, { name: 'All', color: 'gray' }] } },
+    Posts: { number: {} },
+    Impressions: { number: {} },
+    Reach: { number: {} },
+    Reactions: { number: {} },
+    Comments: { number: {} },
+    Shares: { number: {} },
+    Clicks: { number: {} },
+    Saves: { number: {} },
+    'Engagement Rate': { number: { format: 'percent' } },
+    'Best Time': { rich_text: {} },
+  };
+}
+
+export function analyticsCreateBody(
+  parentPageId: string,
+  title = ANALYTICS_TITLE,
+): Record<string, unknown> {
+  return createBody(parentPageId, title, analyticsProperties());
 }
 
 export function ideasProperties(): Record<string, unknown> {
@@ -193,6 +227,7 @@ export interface TemplateSuite {
   contentUrl: string;
   campaignsDatabaseId: string;
   ideasDatabaseId: string;
+  analyticsDatabaseId: string;
 }
 
 /**
@@ -208,6 +243,7 @@ export async function createTemplateSuite(
 ): Promise<TemplateSuite> {
   const campaigns = await client.createDatabase(campaignsCreateBody(parentPageId));
   const ideas = await client.createDatabase(ideasCreateBody(parentPageId));
+  const analytics = await client.createDatabase(analyticsCreateBody(parentPageId));
   const content = await client.createDatabase(templateCreateBody(parentPageId, title));
   await client.updateDatabase(content.id, {
     properties: templateRelationProperties(content.id, campaigns.id),
@@ -217,5 +253,6 @@ export async function createTemplateSuite(
     contentUrl: content.url,
     campaignsDatabaseId: campaigns.id,
     ideasDatabaseId: ideas.id,
+    analyticsDatabaseId: analytics.id,
   };
 }

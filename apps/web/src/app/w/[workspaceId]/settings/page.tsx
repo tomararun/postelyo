@@ -1,4 +1,4 @@
-import { deleteWorkspace, updateWorkspace } from '@/app/actions';
+import { deleteWorkspace, setWeeklyReport, updateWorkspace } from '@/app/actions';
 import { Shell } from '@/components/shell';
 import { Button, Card, Input, Notice, QueryNotices } from '@/components/ui';
 import { api } from '@/lib/api';
@@ -29,13 +29,12 @@ export default async function SettingsPage({
     `/w/${workspaceId}/settings`,
   );
   const action = updateWorkspace.bind(null, workspaceId);
-  const members = canManage
-    ? (
-        await api<{ members: { userId: string; name: string; email: string }[] }>(
-          `/v1/workspaces/${workspaceId}/members`,
-        )
-      ).members
-    : [];
+  const members = (
+    await api<{
+      members: { userId: string; name: string; email: string; weeklyReport: boolean }[];
+    }>(`/v1/workspaces/${workspaceId}/members`)
+  ).members;
+  const self = members.find((m) => m.userId === me.user.id);
   const slots = workspace.evergreen?.slots ?? [];
   return (
     <Shell
@@ -108,6 +107,18 @@ export default async function SettingsPage({
           {canManage && <Button>Save</Button>}
         </form>
       </Card>
+      {(membership.role === 'owner' || membership.role === 'admin') && (
+        <Card title="Weekly report">
+          <form action={setWeeklyReport.bind(null, workspaceId)} className="space-y-3">
+            <Checkbox
+              name="weeklyReport"
+              label="Email me the weekly analytics report on Monday morning"
+              checked={self?.weeklyReport !== false}
+            />
+            <Button>Save</Button>
+          </form>
+        </Card>
+      )}
       <Card title="Links">
         <form action={action} className="space-y-3">
           <input type="hidden" name="linksForm" value="1" />
