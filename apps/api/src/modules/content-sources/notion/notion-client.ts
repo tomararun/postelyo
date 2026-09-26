@@ -60,6 +60,13 @@ export interface NotionBlock {
   value: Record<string, unknown>;
 }
 
+export interface NotionSearchResult {
+  id: string;
+  title: string;
+  url: string;
+  lastEditedTime: string;
+}
+
 export interface NotionPageList {
   pages: NotionPage[];
   hasMore: boolean;
@@ -182,6 +189,42 @@ export class NotionClient {
   /** Patches page properties (writeback). `properties` uses Notion's property value format. */
   async updatePageProperties(pageId: string, properties: Record<string, unknown>): Promise<void> {
     await this.request('PATCH', `/pages/${encodeURIComponent(pageId)}`, { properties });
+  }
+
+  /**
+   * Pages or databases the integration can see (setup wizard). Titles come from
+   * the title property (pages) or the `title` array (databases).
+   */
+  async search(kind: 'page' | 'database', pageSize = 50): Promise<NotionSearchResult[]> {
+    const json = await this.request('POST', '/search', {
+      filter: { property: 'object', value: kind },
+      sort: { direction: 'descending', timestamp: 'last_edited_time' },
+      page_size: pageSize,
+    });
+    const results = Array.isArray(json['results']) ? json['results'] : [];
+    const out: NotionSearchResult[] = [];
+    for (const raw of results) {
+      const r = asRecord(raw);
+      const id = typeof r['id'] === 'string' ? r['id'] : null;
+      if (!id) continue;
+      let title: string;
+      if (kind === 'database') {
+        title = richTextToPlain(r['title']);
+      } else {
+        const props = asRecord(r['properties']);
+        const titleProp = Object.values(props)
+          .map((p) => asRecord(p))
+          .find((p) => p['type'] === 'title');
+        title = titleProp ? richTextToPlain(titleProp['title']) : '';
+      }
+      out.push({
+        id,
+        title: title || 'Untitled',
+        url: typeof r['url'] === 'string' ? r['url'] : '',
+        lastEditedTime: typeof r['last_edited_time'] === 'string' ? r['last_edited_time'] : '',
+      });
+    }
+    return out;
   }
 
   /** Creates a database under a page (template setup); returns id and URL. */

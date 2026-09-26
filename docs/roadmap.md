@@ -66,7 +66,22 @@ Moved to the product roadmap's later phases: Next.js web app (Phase 3), native e
 
 ---
 
-## Phase 3 – Intelligence and growth
+## Phase 3 – Self-serve SaaS (built 2026-09-26)
+
+Goal: a stranger signs up, connects Notion and their socials, invites their team and pays, without talking to us. Product plan: [product-roadmap.md](./product-roadmap.md) Phase 3.
+
+| Item | Notes | Hook | Status |
+|------|-------|------|--------|
+| Public Notion OAuth + setup wizard | `NotionOAuthClient`, pending source until setup; create the template in a chosen page or adopt an existing database; pasted-token path kept | `content_source.config.authKind`, `oauth_state` | Done · Notion public review pending |
+| Teams | `invitation` (hashed 7-day tokens), invite/list/revoke/peek/accept, role changes and removal with the last-owner rule, extra workspaces | §5.1 | Done |
+| Stripe billing | `BillingGateway` (Stripe + fake), Checkout and Customer Portal, signed idempotent webhook, plans Free/Solo/Team/Agency (placeholder prices), limits enforced in services, metering from audit, 14-day grace, operator-granted plans | `billing_customer`, `subscription`, `stripe_event`, `workspace.plan` | Done · prices to decide |
+| `apps/web` dashboard | Next.js App Router + Tailwind, server actions over the api, rewrites for auth/api/oauth/webhooks/media; pages: sign-in, workspaces, setup, connections, team, billing, posts, publication detail, settings, invitations, privacy, terms | §2.2, §18.1 | Done · Fastify pages stay as operator fallback |
+| Notification settings | `notificationEmail`, `alertCopyEmail` per workspace | `workspace.settings` | Done |
+| Deletion and compliance | Soft delete + `workspace-delete` purge job, anonymised audit, `/privacy` and `/terms` placeholders, [compliance.md](./compliance.md) | §11 | Done · legal review pending |
+
+---
+
+## Later – Intelligence and growth
 
 | Item | Notes | Hook |
 |------|-------|------|
@@ -75,8 +90,6 @@ Moved to the product roadmap's later phases: Next.js web app (Phase 3), native e
 | Analytics | Metrics fetch jobs per provider; `publication_metrics` time series; dashboards | `provider_post_id` |
 | Campaigns | Group posts, campaign-level scheduling and reporting | New `campaign` table, `post.campaign_id` |
 | Public API + outbound webhooks | API keys, `Idempotency-Key`, signed webhooks from the audit stream | §11.2, §14 |
-| Billing / subscriptions | Stripe; plan limits enforced in services | `workspace.plan` |
-| Multiple workspaces per user, workspace switching | Already supported by `membership`; UI work | |
 | Scale-out | Redis/BullMQ or SQS if Postgres queue saturates; audit partitioning; regional deployments | §20 |
 | Compliance | SOC 2 readiness, per-tenant keys, data residency | `KeyProvider`, `credential_key_id` |
 

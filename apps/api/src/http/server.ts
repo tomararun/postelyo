@@ -1,5 +1,5 @@
 import formbody from '@fastify/formbody';
-import { linkedInConfig, metaConfig, xConfig, type Env } from '../config/env.js';
+import { linkedInConfig, metaConfig, notionOAuthConfig, xConfig, type Env } from '../config/env.js';
 import type { Db } from '../infra/db/client.js';
 import type { KeyProvider } from '../infra/crypto/key-provider.js';
 import type { Logger } from '../infra/logger.js';
@@ -9,13 +9,18 @@ import { LinkedInConnectFlow } from '../modules/connections/linkedin/linkedin-co
 import { LinkedInOAuthClient } from '../modules/connections/linkedin/linkedin-oauth.js';
 import { MetaConnectFlow } from '../modules/connections/meta/meta-connect.js';
 import { MetaOAuthClient } from '../modules/connections/meta/meta-oauth.js';
+import { NotionConnectFlow } from '../modules/connections/notion/notion-connect.js';
+import { NotionOAuthClient } from '../modules/connections/notion/notion-oauth.js';
 import { OAuthStateService } from '../modules/connections/oauth-state.service.js';
 import { XConnectFlow } from '../modules/connections/x/x-connect.js';
 import { XOAuthClient } from '../modules/connections/x/x-oauth.js';
 import type { Services } from '../services.js';
 import { buildApp, type App } from './app.js';
 import { authPlugin, decorateAuth } from './plugins/auth.js';
+import { billingRoutes } from './routes/billing.js';
 import { connectionRoutes } from './routes/connections.js';
+import { legalRoutes } from './routes/legal.js';
+import { teamRoutes } from './routes/team.js';
 import { mediaRoutes } from './routes/media.js';
 import { meRoutes } from './routes/me.js';
 import { metricsRoutes } from './routes/metrics.js';
@@ -86,6 +91,23 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
         returnPath,
       })
     : null;
+  const nc = notionOAuthConfig(deps.env);
+  const notion = nc
+    ? new NotionConnectFlow({
+        db: deps.db,
+        logger: deps.logger,
+        client: new NotionOAuthClient({
+          clientId: nc.clientId,
+          clientSecret: nc.clientSecret,
+          redirectUri: new URL('/oauth/notion/callback', deps.env.APP_BASE_URL).toString(),
+          ...fetchOpt,
+        }),
+        contentSources,
+        states,
+        setupPath: (workspaceId, sourceId) => `/w/${workspaceId}/setup?source=${sourceId}`,
+        returnPath,
+      })
+    : null;
   const mc = metaConfig(deps.env);
   const meta = mc
     ? new MetaConnectFlow({
@@ -118,7 +140,11 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
   await app.register(formbody);
   await app.register(authPlugin, { auth, appBaseUrl: deps.env.APP_BASE_URL });
   await app.register(metricsRoutes, { metrics, token: deps.env.METRICS_TOKEN ?? null });
-  await app.register(webhookRoutes, { notion: deps.services.notionWebhooks });
+  await app.register(webhookRoutes, {
+    notion: deps.services.notionWebhooks,
+    billing: deps.services.billing,
+  });
+  await app.register(legalRoutes);
   await app.register(mediaRoutes, { storage: deps.services.storage });
   await app.register(pageRoutes, {
     workspaces,
@@ -138,9 +164,11 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     publications,
     appBaseUrl: deps.env.APP_BASE_URL,
   });
-  await app.register(oauthRoutes, { linkedin, x, meta });
+  await app.register(oauthRoutes, { linkedin, x, meta, notion });
   await app.register(meRoutes, { workspaces });
-  await app.register(workspaceRoutes, { workspaces });
+  await app.register(workspaceRoutes, { workspaces, deletion: deps.services.deletion });
+  await app.register(teamRoutes, { workspaces, invitations: deps.services.invitations });
+  await app.register(billingRoutes, { workspaces, billing: deps.services.billing });
   await app.register(connectionRoutes, {
     workspaces,
     socialAccounts,
@@ -149,6 +177,7 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     linkedin,
     x,
     meta,
+    notion,
   });
   await app.register(postRoutes, { postQuery, workspaces });
   await app.register(publicationRoutes, { workspaces, publications });

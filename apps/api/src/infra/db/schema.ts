@@ -145,11 +145,90 @@ export const membership = pgTable(
 
 export type Membership = typeof membership.$inferSelect;
 
+/** Team invitations (Phase 3): single-use hashed tokens, 7-day expiry. */
+export const invitation = pgTable(
+  'invitation',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    email: text('email').notNull(),
+    role: membershipRole('role').notNull(),
+    /** sha256 of the token in the invite link; the token itself is never stored. */
+    tokenHash: text('token_hash').notNull().unique(),
+    invitedByUserId: uuid('invited_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    acceptedByUserId: uuid('accepted_by_user_id').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('invitation_workspace_idx').on(t.workspaceId, t.email)],
+);
+
+export type Invitation = typeof invitation.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Billing (Phase 3). Stripe is the source of truth for money; these rows mirror
+// what the app needs to enforce plan limits without calling Stripe.
+// ---------------------------------------------------------------------------
+
+export const billingCustomer = pgTable('billing_customer', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspace.id, { onDelete: 'cascade' }),
+  stripeCustomerId: text('stripe_customer_id').notNull().unique(),
+  email: text('email'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const subscription = pgTable(
+  'subscription',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    stripeSubscriptionId: text('stripe_subscription_id').notNull().unique(),
+    stripePriceId: text('stripe_price_id'),
+    plan: text('plan').notNull(),
+    /** Stripe status: trialing, active, past_due, canceled, unpaid, incomplete, incomplete_expired, paused. */
+    status: text('status').notNull(),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    cancelAt: timestamp('cancel_at', { withTimezone: true }),
+    /** Payment failed: limits stay until this instant, then the workspace drops to Free. */
+    graceUntil: timestamp('grace_until', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [index('subscription_workspace_idx').on(t.workspaceId, t.status)],
+);
+
+export type Subscription = typeof subscription.$inferSelect;
+
+/** Stripe webhook idempotency: one row per event id, processed exactly once. */
+export const stripeEvent = pgTable('stripe_event', {
+  id: text('id').primaryKey(),
+  type: text('type').notNull(),
+  receivedAt: timestamp('received_at', { withTimezone: true }).notNull(),
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  outcome: text('outcome'),
+});
+
 // ---------------------------------------------------------------------------
 // Connections (domain-model §2.4, §2.5, §2.11)
 // ---------------------------------------------------------------------------
 
-export const socialProvider = pgEnum('social_provider', ['linkedin', 'x', 'instagram', 'facebook']);
+/** Also used for `oauth_state.provider`; `notion` covers the public Notion integration flow (Phase 3). */
+export const socialProvider = pgEnum('social_provider', [
+  'linkedin',
+  'x',
+  'instagram',
+  'facebook',
+  'notion',
+]);
 export const socialAccountStatus = pgEnum('social_account_status', [
   'active',
   'needs_reauth',

@@ -3,3 +3,5 @@ node_modules/
 dist/
 apps/api/drizzle/
 package-lock.json
+.next/
+apps/web/next-env.d.ts

@@ -19,12 +19,18 @@ export interface SyncPageJobData {
   pageId: string;
 }
 
+/** Hard-delete of a soft-deleted workspace (Phase 3). */
+export interface DeleteWorkspaceJobData {
+  workspaceId: string;
+}
+
 export interface JobEnqueuer {
   /** Idempotent per publication: a job already created or active is not duplicated. */
   publish(data: PublishJobData, opts?: { startAfter?: Date }): Promise<void>;
   writeback(data: WritebackJobData): Promise<void>;
   /** Idempotent per page: a burst of webhook events collapses into one sync. */
   syncPage(data: SyncPageJobData): Promise<void>;
+  deleteWorkspace(data: DeleteWorkspaceJobData): Promise<void>;
 }
 
 /** Test double that records what would have been enqueued. */
@@ -32,6 +38,11 @@ export class RecordingEnqueuer implements JobEnqueuer {
   readonly published: { data: PublishJobData; startAfter?: Date }[] = [];
   readonly writebacks: WritebackJobData[] = [];
   readonly syncPages: SyncPageJobData[] = [];
+  readonly deletions: DeleteWorkspaceJobData[] = [];
+
+  async deleteWorkspace(data: DeleteWorkspaceJobData): Promise<void> {
+    this.deletions.push(data);
+  }
 
   async publish(data: PublishJobData, opts?: { startAfter?: Date }): Promise<void> {
     this.published.push(opts?.startAfter ? { data, startAfter: opts.startAfter } : { data });
@@ -49,5 +60,6 @@ export class RecordingEnqueuer implements JobEnqueuer {
     this.published.length = 0;
     this.writebacks.length = 0;
     this.syncPages.length = 0;
+    this.deletions.length = 0;
   }
 }

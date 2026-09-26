@@ -4,6 +4,8 @@ Audience: the marketing lead or founder setting up Postelyo for their team, and 
 
 What you get: you keep writing and reviewing posts in Notion. When you set a post to **Scheduled** with a date, Postelyo publishes it to your LinkedIn profile at that time and writes the result back into Notion.
 
+There are two ways to connect Notion. **Connect with Notion** (one click, recommended) creates the content database for you; skip to section 2a. The **integration token** path (sections 2 to 4) is for teams that prefer their own internal integration.
+
 ---
 
 ## 1. Sign in and set your workspace time zone
@@ -12,7 +14,14 @@ What you get: you keep writing and reviewing posts in Notion. When you set a pos
 2. A workspace is created for you. Open **Connections**.
 3. Ask your Postelyo contact to set the workspace **time zone** and **default publish time** if they are not right for you (for example `Europe/Berlin`, `09:00`). Dates in Notion without a time publish at the default time in that zone.
 
-## 2. Create the Notion integration
+## 2a. Connect with Notion (recommended)
+
+1. On **Connections** click **Connect with Notion**. Notion asks which pages Postelyo may use: pick one page (for example your marketing wiki page) and confirm.
+2. Back in Postelyo, choose **Create the content database** and the page you shared. Postelyo creates a database called **Postelyo Content** under it with every property already correct.
+3. Already have a matching database? Choose **Use an existing database** instead; Postelyo checks it against the template and tells you what is missing.
+4. Skip to section 5.
+
+## 2. Create the Notion integration (token path)
 
 1. In Notion, go to **Settings & members → Connections → Develop or manage integrations** (or open notion.so/my-integrations).
 2. **New integration**: name it `Postelyo`, pick your workspace, type *Internal*. Capabilities needed: read content, update content, insert content. No user information is needed.
@@ -49,6 +58,18 @@ If it shows **Validation error**, read the note, fix the page, and it re-checks 
 
 ---
 
+## Your team
+
+**Team** page: invite colleagues by email with a role. *Editor* can retry posts; *Admin* can also manage connections and settings; *Owner* can manage billing and delete the workspace. Invitations expire after 7 days; the invited person signs in with their email and accepts. The number of members depends on your plan.
+
+## Plans and billing
+
+**Billing** page: what your plan allows (connected accounts, posts per month, members), what you use, and the upgrade buttons. Payment happens on Stripe's checkout page; *Manage billing* opens Stripe's portal for invoices, cards and cancellations. If a payment fails you keep your plan for 14 days, then the workspace falls back to Free until the payment goes through. A post that would exceed the monthly limit shows **Validation error** in Notion with the reason.
+
+## Settings
+
+Owners and admins set the time zone, default publish time, daily cap, which platforms are enabled, and two email addresses: where account notices (like LinkedIn expiring) go, and an optional copy of operational alerts. Owners can delete the workspace from the **Danger zone**: scheduled posts are cancelled at once and everything is purged shortly after.
+
 ## Daily use
 
 | Do this in Notion | What happens |
@@ -73,6 +94,7 @@ Rules of thumb:
 
 - **Posts** page in Postelyo: every post, its state, the LinkedIn link, and for failures the exact reason.
 - **Connections** page: shows if the LinkedIn authorization is about to expire and if the background worker is healthy.
+- **Billing** page: whether a plan limit is what stopped a post or a connection.
 - Emails from Postelyo: sign-in links, LinkedIn re-authorization notices.
 
 ## Getting help

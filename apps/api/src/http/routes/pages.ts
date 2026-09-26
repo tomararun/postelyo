@@ -31,7 +31,10 @@ export interface PagesOptions {
   providerMode: 'fake' | 'live';
 }
 
-const signInForm = z.object({ email: z.email() });
+const signInForm = z.object({ email: z.email(), next: z.string().optional() });
+/** Only same-origin paths may be used as the post-sign-in destination (no open redirects). */
+const safeNext = (p: string | undefined) =>
+  p && p.startsWith('/') && !p.startsWith('//') && !/[\r\n\\]/.test(p) ? p : '/';
 const notionForm = z.object({ token: z.string().min(1), database: z.string().min(1) });
 
 /**
@@ -46,7 +49,7 @@ export const pageRoutes: FastifyPluginAsync<PagesOptions> = async (app, opts) =>
   app.get('/sign-in', async (req, reply) => {
     await loadUser(req);
     if (req.user) return reply.redirect('/');
-    const { sent, error } = req.query as { sent?: string; error?: string };
+    const { sent, error, next } = req.query as { sent?: string; error?: string; next?: string };
     return reply.type('text/html').send(
       layout(
         'Sign in',
@@ -64,6 +67,7 @@ export const pageRoutes: FastifyPluginAsync<PagesOptions> = async (app, opts) =>
           <form method="post" action="/sign-in">
             <label for="email">Email address</label>
             <input id="email" name="email" type="email" required autocomplete="email" />
+            <input type="hidden" name="next" value="${safeNext(next)}" />
             <p><button type="submit">Send sign-in link</button></p>
           </form>
         `,
@@ -81,7 +85,7 @@ export const pageRoutes: FastifyPluginAsync<PagesOptions> = async (app, opts) =>
     const email = parsed.data.email.toLowerCase();
     try {
       await app.auth.api.signInMagicLink({
-        body: { email, callbackURL: '/' },
+        body: { email, callbackURL: safeNext(parsed.data.next) },
         headers: fromNodeHeaders(req.headers),
       });
     } catch (err) {

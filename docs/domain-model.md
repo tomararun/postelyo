@@ -42,9 +42,9 @@ Aggregate roots: `Workspace`, `Post` (with its `Publication`s and `PublishAttemp
 | name | text | |
 | default_timezone | text | IANA, required (e.g. `Europe/Berlin`) |
 | default_publish_time | time | Local wall-clock used when a source date has no time (default 09:00) |
-| plan | text | `free` in MVP; reserved for billing |
-| settings | jsonb | Small, versioned bag (`{ "v": 1, "late_publish_policy": "publish" }`) |
-| deleted_at | timestamptz null | Soft delete |
+| plan | text | `free`, `solo`, `team`, `agency`. With a `subscription` row Stripe's state is synced here; without one the column is the source of truth (operator-granted plans) |
+| settings | jsonb | Small, versioned bag: `dailyCapPerAccount`, `notionWebhooks`, `providers.{x,facebook,instagram}`, Phase 3 `notificationEmail` (account notices) and `alertCopyEmail` (copy of alerts) |
+| deleted_at | timestamptz null | Soft delete (Phase 3): hidden from members and the tenancy guard at once; the `workspace-delete` job purges the row, cascading every tenant table |
 
 ### 2.2 `user`
 
@@ -79,7 +79,7 @@ A connected authoring system. MVP: exactly one per workspace, kind `notion`.
 | credential_key_id | text | Which master key encrypted the DEK |
 | external_database_id | text null | Notion database id (dashed uuid); null for `native` |
 | external_database_title | text null | Display name captured at connect time |
-| config | jsonb | Non-secret settings: `{ "propertyMap": {...}, "warnings": [...], "pollIntervalSeconds": 60 }` |
+| config | jsonb | Non-secret settings: `{ "propertyMap": {...}, "warnings": [...], "pollIntervalSeconds": 60 }`; Phase 3 adds `authKind` (`oauth`/`token`), `notionBotId`, `notionWorkspaceId`, `notionWorkspaceName`, `duplicatedTemplateId`, `setupPending`, `setupMode` |
 | cursor | jsonb | `{ "last_edited_after": "2026-09-21T10:00:00Z" }` incremental polling cursor |
 | last_sync_at | timestamptz null | |
 | last_error | text null | Sanitized, never contains secrets |
@@ -275,6 +275,52 @@ Rows are never updated or deleted by application code.
 | processed_at | timestamptz null | |
 | outcome | text null | `enqueued`, `duplicate`, `ignored:<reason>` |
 | UNIQUE (source, external_event_id) | | |
+
+### 2.12a `invitation` (Phase 3)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS |
+| email | text | Lower-cased |
+| role | enum membership role | Granted on accept; admins may grant up to `admin` |
+| token_hash | text UNIQUE | SHA-256 of the link token; the token itself is only in the email |
+| invited_by_user_id | uuid FK | |
+| expires_at | timestamptz | 7 days |
+| accepted_at / accepted_by_user_id | null | Set once |
+| revoked_at | timestamptz null | |
+
+### 2.12b `billing_customer` (Phase 3)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| workspace_id | uuid PK FK | One Stripe customer per workspace |
+| stripe_customer_id | text UNIQUE | |
+| email | text null | As reported by Checkout |
+
+### 2.12c `subscription` (Phase 3)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS |
+| stripe_subscription_id | text UNIQUE | Upsert key for webhooks |
+| stripe_price_id | text null | Mapped to a plan through `STRIPE_PRICE_*` |
+| plan | text | `free` when the price is unknown |
+| status | text | Stripe status verbatim (`active`, `trialing`, `past_due`, `canceled`, ...) |
+| current_period_end / cancel_at | timestamptz null | Display |
+| grace_until | timestamptz null | Set by `invoice.payment_failed` (now + 14 days); cleared by `invoice.paid` |
+
+Effective plan = `plan` while `active`/`trialing`, or while `past_due` before `grace_until`; otherwise `free`. Maintenance syncs expired grace periods into `workspace.plan`.
+
+### 2.12d `stripe_event` (Phase 3)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | text PK | Stripe event id; the insert is the idempotency check |
+| type | text | |
+| received_at / processed_at | timestamptz | |
+| outcome | text null | `customer_linked`, `subscription_active`, `grace_started`, `ignored:<reason>`, `error:<message>` |
 
 ### 2.13 Queue tables
 

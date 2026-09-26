@@ -129,6 +129,7 @@ describe('phase 2 multi-platform', () => {
       },
     });
     ({ cookie, workspaceId } = await stack.signInWithWorkspace(uniqueEmail('p2')));
+    await stack.grantPlan(workspaceId, 'agency');
     const src = await stack.app.inject({
       method: 'POST',
       url: `/v1/workspaces/${workspaceId}/content-sources/notion`,

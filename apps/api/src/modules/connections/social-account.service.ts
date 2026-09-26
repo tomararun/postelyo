@@ -16,7 +16,8 @@ import type {
 
 export class ConnectionError extends Error {
   constructor(
-    public readonly code: 'already_connected' | 'not_found' | 'no_credentials' | 'refresh_failed',
+    public readonly code:
+      'already_connected' | 'not_found' | 'no_credentials' | 'refresh_failed' | 'plan_limit',
     message: string,
   ) {
     super(message);
@@ -106,6 +107,8 @@ const REFRESH_LEAD_MS = 5 * 60_000;
  */
 export class SocialAccountService {
   private readonly refreshers = new Map<SocialProvider, TokenRefresher>();
+  /** Plan-limit guard (Phase 3): throws when connecting `adding` accounts would exceed the plan. */
+  private capacityGuard: ((workspaceId: string, adding: number) => Promise<void>) | null = null;
 
   constructor(
     private readonly db: Db,
@@ -115,6 +118,43 @@ export class SocialAccountService {
 
   registerRefresher(provider: SocialProvider, refresher: TokenRefresher): void {
     this.refreshers.set(provider, refresher);
+  }
+
+  registerCapacityGuard(guard: (workspaceId: string, adding: number) => Promise<void>): void {
+    this.capacityGuard = guard;
+  }
+
+  /** Counts only accounts that are new to the workspace (reconnects are free). */
+  private async assertCapacity(
+    ctx: TenantContext,
+    candidates: { provider: SocialProvider; providerAccountId: string }[],
+  ): Promise<void> {
+    if (!this.capacityGuard) return;
+    const rows = await withTenantScope(this.db, ctx.workspaceId, (tx) =>
+      tx
+        .select({
+          provider: socialAccount.provider,
+          providerAccountId: socialAccount.providerAccountId,
+        })
+        .from(socialAccount)
+        .where(
+          and(eq(socialAccount.workspaceId, ctx.workspaceId), isNull(socialAccount.disconnectedAt)),
+        ),
+    );
+    const known = new Set(rows.map((r) => `${r.provider}:${r.providerAccountId}`));
+    const adding = candidates.filter(
+      (c) => !known.has(`${c.provider}:${c.providerAccountId}`),
+    ).length;
+    if (adding === 0) return;
+    try {
+      await this.capacityGuard(ctx.workspaceId, adding);
+    } catch (err) {
+      // Plan limits (Phase 3) read like any other connection refusal to the OAuth callbacks.
+      if (err instanceof Error && err.name === 'PlanLimitError') {
+        throw new ConnectionError('plan_limit', err.message);
+      }
+      throw err;
+    }
   }
 
   async list(ctx: TenantContext): Promise<SocialAccountDto[]> {
@@ -145,6 +185,7 @@ export class SocialAccountService {
     identity: LinkedInIdentity,
     tokens: LinkedInTokens,
   ): Promise<SocialAccountDto> {
+    await this.assertCapacity(ctx, [{ provider: 'linkedin', providerAccountId: identity.sub }]);
     const row = await withTenantScope(this.db, ctx.workspaceId, (tx) =>
       this.upsert(tx, ctx, {
         provider: 'linkedin',
@@ -170,6 +211,10 @@ export class SocialAccountService {
     tokens: LinkedInTokens,
     organizations: LinkedInOrganization[],
   ): Promise<SocialAccountDto[]> {
+    await this.assertCapacity(
+      ctx,
+      organizations.map((o) => ({ provider: 'linkedin' as const, providerAccountId: o.id })),
+    );
     return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
       const out: SocialAccountDto[] = [];
       for (const org of organizations) {
@@ -194,6 +239,10 @@ export class SocialAccountService {
     ctx: TenantContext,
     inputs: UpsertAccountInput[],
   ): Promise<SocialAccountDto[]> {
+    await this.assertCapacity(
+      ctx,
+      inputs.map((i) => ({ provider: i.provider, providerAccountId: i.providerAccountId })),
+    );
     return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
       const out: SocialAccountDto[] = [];
       const idsByProviderAccount = new Map<string, string>();

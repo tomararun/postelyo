@@ -110,6 +110,7 @@ describe('connections', () => {
 
   it('reconnecting the same profile refreshes tokens; a different profile becomes a second account', async () => {
     const { cookie, workspaceId } = await stack.signInWithWorkspace(uniqueEmail('li2'));
+    await stack.grantPlan(workspaceId, 'agency');
     await connectLinkedIn(cookie, workspaceId, 'good-code');
     const again = await connectLinkedIn(cookie, workspaceId, 'good-code');
     expect(again.location).toContain('connected=linkedin');

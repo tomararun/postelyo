@@ -2,7 +2,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { inject } from 'vitest';
 import { pino } from 'pino';
+import { eq } from 'drizzle-orm';
 import type { Env } from '../../src/config/env.js';
+import { workspace } from '../../src/infra/db/schema.js';
 import { EnvKeyProvider } from '../../src/infra/crypto/key-provider.js';
 import { createDb } from '../../src/infra/db/client.js';
 import { LogMailer } from '../../src/infra/mailer.js';
@@ -10,6 +12,7 @@ import { buildServer } from '../../src/http/server.js';
 import type { App } from '../../src/http/app.js';
 import { RecordingEnqueuer, type JobEnqueuer } from '../../src/modules/publishing/jobs.js';
 import { buildServices, type Services } from '../../src/services.js';
+import type { BillingGateway } from '../../src/modules/billing/gateway.js';
 import type { Clock } from '../../src/shared/clock.js';
 
 export const TEST_ENCRYPTION_KEYS = 'k1:' + Buffer.alloc(32, 7).toString('base64');
@@ -54,6 +57,8 @@ export interface TestStack {
   signIn: (email: string) => Promise<string>;
   /** Signs in and returns the cookie plus the user's default workspace id. */
   signInWithWorkspace: (email: string) => Promise<{ cookie: string; workspaceId: string }>;
+  /** Operator-granted plan (Phase 3): raises the limits of a workspace with no subscription. */
+  grantPlan: (workspaceId: string, plan: 'free' | 'solo' | 'team' | 'agency') => Promise<void>;
 }
 
 export interface TestStackOptions {
@@ -61,6 +66,8 @@ export interface TestStackOptions {
   fetchImpl?: typeof fetch;
   enqueue?: JobEnqueuer;
   workerId?: string;
+  /** Phase 3: stub Stripe Checkout/Portal; the webhook path is exercised with signed events. */
+  billingGateway?: BillingGateway;
 }
 
 export async function createTestStack(opts: TestStackOptions = {}): Promise<TestStack> {
@@ -83,6 +90,7 @@ export async function createTestStack(opts: TestStackOptions = {}): Promise<Test
     fetchImpl: opts.fetchImpl,
     clock,
     random: () => 0.5,
+    ...(opts.billingGateway ? { billingGateway: opts.billingGateway } : {}),
   });
   const app = await buildServer({
     env,
@@ -139,6 +147,9 @@ export async function createTestStack(opts: TestStackOptions = {}): Promise<Test
     clock,
     signIn,
     signInWithWorkspace,
+    grantPlan: async (workspaceId, plan) => {
+      await db.db.update(workspace).set({ plan }).where(eq(workspace.id, workspaceId));
+    },
     close: async () => {
       await app.close();
       await db.close();

@@ -152,7 +152,9 @@ Do not implement analytics or AI in this phase.
 
 ---
 
-## Phase 3 – Self-serve SaaS
+## Phase 3 – Self-serve SaaS (built 2026-09-26)
+
+**Status.** Built and tested against fakes: Notion public OAuth with the setup wizard, teams, Stripe billing with plan limits (placeholder prices), the `apps/web` dashboard, notification settings, workspace deletion and the compliance checklist. Pending outside the code: Notion public integration review, Stripe live configuration and real prices, counsel review of privacy/terms. Details in [roadmap.md](./roadmap.md) Phase 3 and [compliance.md](./compliance.md).
 
 **Goal.** A stranger can sign up, connect Notion and their socials, and pay, without talking to us.
 

@@ -37,6 +37,9 @@ export interface WorkspacePatch {
   notionWebhooks?: boolean | undefined;
   /** Per-platform flags (Phase 2); merged into the existing map. */
   providers?: Partial<Record<FlaggedProvider, boolean | undefined>> | undefined;
+  /** Phase 3 notification settings; null clears. */
+  notificationEmail?: string | null | undefined;
+  alertCopyEmail?: string | null | undefined;
 }
 
 const DEFAULT_TIMEZONE = 'UTC';
@@ -66,12 +69,20 @@ export class WorkspaceService {
 
   /** Membership lookup used by the tenancy guard; null means "not a member" (→ 404). */
   async findMembership(userId: string, workspaceId: string): Promise<Membership | null> {
+    // A soft-deleted workspace (Phase 3) is invisible: the purge job finishes it off.
     const [row] = await this.db
-      .select()
+      .select({ m: membership })
       .from(membership)
-      .where(and(eq(membership.userId, userId), eq(membership.workspaceId, workspaceId)))
+      .innerJoin(workspace, eq(workspace.id, membership.workspaceId))
+      .where(
+        and(
+          eq(membership.userId, userId),
+          eq(membership.workspaceId, workspaceId),
+          isNull(workspace.deletedAt),
+        ),
+      )
       .limit(1);
-    return row ?? null;
+    return row?.m ?? null;
   }
 
   /** Tenant-scoped read. */
@@ -189,6 +200,12 @@ export class WorkspaceService {
         });
       }
     }
+    for (const k of ['notificationEmail', 'alertCopyEmail'] as const) {
+      const v = patch[k];
+      if (typeof v === 'string' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim())) {
+        issues.push({ path: k, message: 'must be an email address' });
+      }
+    }
     if (issues.length > 0) throw new ValidationError(issues);
 
     return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
@@ -202,7 +219,9 @@ export class WorkspaceService {
       if (
         patch.dailyCapPerAccount !== undefined ||
         patch.notionWebhooks !== undefined ||
-        patch.providers !== undefined
+        patch.providers !== undefined ||
+        patch.notificationEmail !== undefined ||
+        patch.alertCopyEmail !== undefined
       ) {
         // Unknown keys are kept; known keys are replaced or removed explicitly.
         const merged: Record<string, unknown> = { ...(before.settings as Record<string, unknown>) };
@@ -221,6 +240,13 @@ export class WorkspaceService {
           }
           settings.providers = providers;
         }
+        for (const k of ['notificationEmail', 'alertCopyEmail'] as const) {
+          const v = patch[k];
+          if (v === null) {
+            delete settings[k];
+            delete merged[k];
+          } else if (v !== undefined) settings[k] = v;
+        }
         values.settings = { ...merged, ...settings };
       }
       const [after] = await tx
@@ -236,7 +262,12 @@ export class WorkspaceService {
       );
       const settingsBefore = readSettings(before);
       const settingsAfter = readSettings(after);
-      for (const k of ['dailyCapPerAccount', 'notionWebhooks'] as const) {
+      for (const k of [
+        'dailyCapPerAccount',
+        'notionWebhooks',
+        'notificationEmail',
+        'alertCopyEmail',
+      ] as const) {
         if (settingsBefore[k] !== settingsAfter[k]) {
           changed[k] = { from: settingsBefore[k] ?? null, to: settingsAfter[k] ?? null };
         }

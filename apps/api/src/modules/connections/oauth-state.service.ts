@@ -5,7 +5,7 @@ import { uuidv7 } from '../../shared/ids.js';
 import type { Clock } from '../../shared/clock.js';
 import { systemClock } from '../../shared/clock.js';
 
-export type OAuthProvider = 'linkedin' | 'x' | 'instagram' | 'facebook';
+export type OAuthProvider = 'linkedin' | 'x' | 'instagram' | 'facebook' | 'notion';
 export type OAuthAccountType = 'member' | 'organization';
 
 export interface OAuthStateRow {

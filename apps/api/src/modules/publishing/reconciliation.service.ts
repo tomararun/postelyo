@@ -13,7 +13,7 @@ import { recordAudit } from '../audit/audit.js';
 import type { SocialAccountService } from '../connections/social-account.service.js';
 import type { CanonicalContent, PostSnapshot } from '../posts/content.js';
 import { systemContext } from '../tenancy/tenant-context.js';
-import { accountRef } from './engine.js';
+import { accountRef, providerIdOf } from './engine.js';
 import type { PublicationService } from './publication.service.js';
 import type { ProviderPostRef } from './provider.js';
 import type { ProviderRegistry } from './registry.js';
@@ -94,7 +94,7 @@ export class ReconciliationService {
       .where(eq(socialAccount.id, pub.socialAccountId))
       .limit(1);
     const [postRow] = await db.select().from(post).where(eq(post.id, pub.postId)).limit(1);
-    const provider = account ? this.deps.providers.get(account.provider) : null;
+    const provider = account ? this.deps.providers.get(providerIdOf(account.provider)) : null;
     if (!account || !postRow || !provider?.lookupRecent || !account.accessTokenEnc) {
       await this.bump(pub, 'unsupported', {
         reason: !provider?.lookupRecent ? 'provider_has_no_lookup' : 'account_or_post_missing',

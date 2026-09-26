@@ -100,6 +100,9 @@ export class AlertService {
     if (!(await this.claim(kind, entityKey, workspaceId, message))) return 'suppressed';
     const email = alertEmail({ kind, message, link, environment: this.deps.environment });
     await this.deps.mailer.send({ to, ...email });
+    // Phase 3: a workspace may ask for a copy of alerts that concern it.
+    const copy = await this.deps.targets.alertCopyFor(workspaceId);
+    if (copy && copy !== to) await this.deps.mailer.send({ to: copy, ...email });
     await recordAudit(this.deps.db, {
       workspaceId,
       actor: { type: 'system', id: 'alerts' },

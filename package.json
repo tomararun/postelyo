@@ -14,6 +14,7 @@
   "scripts": {
     "dev:api": "npm run dev:api --workspace apps/api",
     "dev:worker": "npm run dev:worker --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
     "build": "npm run build --workspaces",
     "lint": "eslint .",
     "format": "prettier --write .",

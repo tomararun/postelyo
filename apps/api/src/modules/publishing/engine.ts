@@ -25,7 +25,7 @@ import { assertPublicationTransition } from '../posts/state-machine.js';
 import { systemContext, type TenantContext } from '../tenancy/tenant-context.js';
 import { backoffMs } from './backoff.js';
 import type { JobEnqueuer, PublishJobData } from './jobs.js';
-import type { AccountType, PublishResult, SocialAccountRef } from './provider.js';
+import type { AccountType, ProviderId, PublishResult, SocialAccountRef } from './provider.js';
 import type { ProviderRegistry } from './registry.js';
 
 export type PublishOutcome = 'skipped' | 'published' | 'retry_scheduled' | 'failed' | 'ambiguous';
@@ -164,7 +164,7 @@ export class PublishEngine {
     }
 
     // 3. Render, enrich media metadata, validate, publish.
-    const provider = this.deps.providers.get(account.provider);
+    const provider = this.deps.providers.get(providerIdOf(account.provider));
     const ref = accountRef(account);
     const content = postRow.content as CanonicalContent;
     const snapshot: PostSnapshot = {
@@ -511,11 +511,16 @@ export class PublishEngine {
 
 const ACCOUNT_TYPES = new Set(['member', 'organization', 'page', 'business']);
 
+/** `social_account.provider` shares its enum with OAuth states (which also hold `notion`); accounts never are. */
+export function providerIdOf(p: SocialAccount['provider']): ProviderId {
+  return p === 'notion' ? 'fake' : p;
+}
+
 export function accountRef(a: SocialAccount): SocialAccountRef {
   return {
     id: a.id,
     workspaceId: a.workspaceId,
-    provider: a.provider,
+    provider: providerIdOf(a.provider),
     accountType: (ACCOUNT_TYPES.has(a.accountType) ? a.accountType : 'member') as AccountType,
     providerAccountId: a.providerAccountId,
     displayName: a.displayName,

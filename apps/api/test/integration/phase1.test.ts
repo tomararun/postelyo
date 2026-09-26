@@ -121,6 +121,7 @@ describe('phase 1 hardening', () => {
       },
     });
     ({ cookie, workspaceId } = await stack.signInWithWorkspace(uniqueEmail('p1')));
+    await stack.grantPlan(workspaceId, 'agency');
     const connect = await stack.app.inject({
       method: 'POST',
       url: `/v1/workspaces/${workspaceId}/content-sources/notion`,
@@ -379,6 +380,7 @@ describe('phase 1 hardening', () => {
         heartbeat: stack.services.heartbeat,
         notionWebhooks: stack.services.notionWebhooks,
         media: stack.services.media,
+        billing: stack.services.billing,
       },
       'maint-1',
       pino({ level: 'silent' }),

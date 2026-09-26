@@ -35,6 +35,9 @@ export async function withTenantScope<T>(
 export const RLS_TABLES = [
   'workspace',
   'membership',
+  'invitation',
+  'billing_customer',
+  'subscription',
   'social_account',
   'oauth_state',
   'content_source',

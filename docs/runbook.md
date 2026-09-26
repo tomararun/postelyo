@@ -76,6 +76,12 @@ Per-workspace counts of published, failed, needs-review, accounts needing re-aut
 | Change the daily cap or enable webhooks | `PATCH /v1/workspaces/:ws {"dailyCapPerAccount": 50}` / `{"notionWebhooks": true}` | admin+ |
 | Enable X, Facebook or Instagram for a workspace | `PATCH /v1/workspaces/:ws {"providers": {"x": true, "facebook": true, "instagram": true}}` (server app credentials must be set too) | admin+ |
 | Connect X / Facebook Pages + Instagram | Connections → *Connect X profile* / *Connect Facebook Pages you manage* | admin+ |
+| Invite a member, change a role, remove a member | Dashboard → Team, or `POST /v1/workspaces/:ws/invitations {email, role}` / `PATCH .../members/:userId {role}` / `DELETE .../members/:userId` | admin+ (owner role: owners only) |
+| Comp a plan (pilot, partner) with no Stripe subscription | `update workspace set plan = 'team' where id = '...'` (any of `free`, `solo`, `team`, `agency`); takes effect immediately, overridden the moment a Stripe subscription exists | operator |
+| Upgrade / manage billing | Dashboard → Billing → *Upgrade* (Stripe Checkout) / *Manage billing* (Customer Portal) | owner |
+| Route account notices or copy alerts to another address | Dashboard → Settings, or `PATCH /v1/workspaces/:ws {"notificationEmail": "...", "alertCopyEmail": "..."}` (`null` clears) | admin+ |
+| Delete a workspace | Dashboard → Settings → *Danger zone* (type DELETE), or `DELETE /v1/workspaces/:ws` → 202; purge runs 10 minutes later | owner |
+| Undo a deletion within the 10-minute window | `update workspace set deleted_at = null where id = '...'`; the purge job then reports `skipped`. Cancelled publications stay cancelled (reschedule in Notion) | operator |
 
 Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by editing the post. Postelyo never retries a terminal failure by itself.
 
@@ -99,6 +105,22 @@ Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by
 2. Notion posts a one-time `verification_token`; the api logs it at `warn` level ("set NOTION_WEBHOOK_SECRET to this value"). Set the variable, redeploy, then confirm the subscription in Notion.
 3. Enable per workspace: `PATCH /v1/workspaces/:ws {"notionWebhooks": true}`. Events for other workspaces are stored as `ignored:webhooks_disabled`.
 4. Verify: `select external_event_id, event_type, outcome from webhook_event order by received_at desc limit 20`. Polling continues regardless, so a broken subscription only costs latency.
+
+### Configure the public Notion integration ("Connect with Notion")
+1. In Notion's integration settings create a **Public** integration: redirect URI `$APP_BASE_URL/oauth/notion/callback`, capabilities read/update/insert content, privacy and terms URLs `$APP_BASE_URL/privacy` and `/terms`.
+2. Set `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` (both or neither) and redeploy. The Connections page then shows *Connect with Notion*; the pasted-token form stays.
+3. Until Notion approves the integration only workspaces you own can install it; the token path covers everyone else meanwhile.
+4. A source that shows *Notion is connected but not set up yet* is a pending OAuth source (`content_source.status = disabled`, `config.setupPending = true`); the user finishes it at `/w/:ws/setup?source=...`. Disconnecting it discards the token.
+
+### Configure Stripe billing
+1. Create the products and monthly prices in Stripe (Solo, Team, Agency, placeholder amounts $19 / $49 / $149) and put the price ids in `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_AGENCY`. A missing id hides that plan.
+2. Add a webhook endpoint `$APP_BASE_URL/webhooks/stripe` with `checkout.session.completed`, `customer.subscription.created|updated|deleted`, `invoice.paid`, `invoice.payment_failed`; set `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. Locally: `stripe listen --forward-to localhost:3000/webhooks/stripe`.
+3. Enable the Customer Portal in Stripe (cancel, update payment method, switch plan).
+4. Verify with a test card: `select plan, status, grace_until from subscription`, `select id, type, outcome from stripe_event order by received_at desc limit 20`, and `workspace.plan`. Failed payment → `past_due` with a 14-day `grace_until`, then maintenance drops the workspace to Free (`billing.plan_changed` audit event with reason `grace_expired`).
+5. Without `STRIPE_SECRET_KEY` billing is read-only (`billingConfigured: false`); in `PROVIDER_MODE=fake` a fake gateway returns `https://checkout.stripe.test/...` URLs for development.
+
+### Run the dashboard
+`apps/web` listens on 3001 (`npm run dev:web`) and proxies auth, `/v1`, OAuth callbacks, webhooks and media to `API_INTERNAL_URL` (default `http://localhost:3000`). When the dashboard fronts the api, set the api's `APP_BASE_URL` to the dashboard origin so OAuth redirect URIs, invitation links and Stripe return URLs point at it. In production it is a separate Fly app built from `apps/web/Dockerfile`.
 
 ### Media storage
 Images are stored once per workspace and content hash. With `STORAGE_DRIVER=local` the api serves them at `/media/<key>` from `STORAGE_LOCAL_DIR` (single instance only; the worker and api must share the directory or the volume). In production use `s3` with Cloudflare R2 and a public custom domain (`S3_PUBLIC_BASE_URL`), because Instagram and Facebook fetch the image by URL. Maintenance deletes objects no asset references for 7 days (`mediaPruned` in the maintenance log). A publication failing with "Image could not be prepared" means the variant derivation failed: check the worker log for the `sharp` error and the original file in storage.
@@ -163,3 +185,7 @@ Never `select access_token_enc` for any reason other than confirming it is null 
 | `S3_ENDPOINT` / `S3_REGION` / `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_PUBLIC_BASE_URL` | both | Required for `s3`; R2: endpoint `https://<account>.r2.cloudflarestorage.com`, region `auto`, public base URL = the bucket's custom domain |
 | `APP_VERSION` | both | set by the deploy pipeline; shown in heartbeats |
 | `INSTANCE_ID` | worker | defaults to hostname-pid |
+| `NOTION_CLIENT_ID` / `NOTION_CLIENT_SECRET` | api | Public Notion integration for *Connect with Notion*; both or neither |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | api (the worker only reads the database for grace expiry) | Webhook secret is required with the key |
+| `STRIPE_PRICE_SOLO` / `STRIPE_PRICE_TEAM` / `STRIPE_PRICE_AGENCY` | api | Stripe price ids; a missing one hides the plan |
+| `API_INTERNAL_URL` | web | Where the dashboard proxies to (api's internal address) |

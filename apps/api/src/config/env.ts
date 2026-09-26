@@ -36,6 +36,15 @@ const envSchema = z.object({
   /** Meta app for Facebook Pages and Instagram. Both or neither. */
   META_APP_ID: z.string().min(1).optional(),
   META_APP_SECRET: z.string().min(1).optional(),
+  /** Notion public integration (Phase 3). Both or neither; the internal-token path works without it. */
+  NOTION_CLIENT_ID: z.string().min(1).optional(),
+  NOTION_CLIENT_SECRET: z.string().min(1).optional(),
+  /** Stripe (Phase 3). Without a secret key, billing pages show plans but cannot check out. */
+  STRIPE_SECRET_KEY: z.string().min(1).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(1).optional(),
+  STRIPE_PRICE_SOLO: z.string().min(1).optional(),
+  STRIPE_PRICE_TEAM: z.string().min(1).optional(),
+  STRIPE_PRICE_AGENCY: z.string().min(1).optional(),
   /** Media object storage (Phase 2): `local` serves files from the api; `s3` for R2/MinIO/AWS. */
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('.data/media'),
@@ -98,6 +107,12 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   if (Boolean(env.META_APP_ID) !== Boolean(env.META_APP_SECRET)) {
     issues.push('META_APP_ID / META_APP_SECRET: set both or neither');
   }
+  if (Boolean(env.NOTION_CLIENT_ID) !== Boolean(env.NOTION_CLIENT_SECRET)) {
+    issues.push('NOTION_CLIENT_ID / NOTION_CLIENT_SECRET: set both or neither');
+  }
+  if (env.STRIPE_SECRET_KEY && !env.STRIPE_WEBHOOK_SECRET) {
+    issues.push('STRIPE_WEBHOOK_SECRET: required when STRIPE_SECRET_KEY is set');
+  }
   if (env.STORAGE_DRIVER === 's3') {
     for (const k of ['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const) {
       if (!env[k]) issues.push(`${k}: required when STORAGE_DRIVER=s3`);
@@ -132,6 +147,14 @@ export function linkedInConfig(env: Env): OAuthAppConfig | null {
 export function xConfig(env: Pick<Env, 'X_CLIENT_ID' | 'X_CLIENT_SECRET'>): OAuthAppConfig | null {
   return env.X_CLIENT_ID && env.X_CLIENT_SECRET
     ? { clientId: env.X_CLIENT_ID, clientSecret: env.X_CLIENT_SECRET }
+    : null;
+}
+
+export function notionOAuthConfig(
+  env: Pick<Env, 'NOTION_CLIENT_ID' | 'NOTION_CLIENT_SECRET'>,
+): OAuthAppConfig | null {
+  return env.NOTION_CLIENT_ID && env.NOTION_CLIENT_SECRET
+    ? { clientId: env.NOTION_CLIENT_ID, clientSecret: env.NOTION_CLIENT_SECRET }
     : null;
 }
 

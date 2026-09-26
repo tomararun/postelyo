@@ -24,7 +24,7 @@ import {
   clearedWriteback,
   type DesiredWriteback,
 } from '../content-sources/notion/notion-writeback.js';
-import { accountRef } from '../publishing/engine.js';
+import { accountRef, providerIdOf } from '../publishing/engine.js';
 import type { AccountType } from '../publishing/provider.js';
 import type { ProviderRegistry } from '../publishing/registry.js';
 import { providerEnabled } from '../workspaces/settings.js';
@@ -94,6 +94,8 @@ export interface PostIngestDeps {
   media: MediaService;
   clock: Clock;
   logger: Logger;
+  /** Phase 3 plan limit: resolves to a reason when the workspace may not schedule more posts this month. */
+  postLimit?: (workspaceId: string) => Promise<string | null>;
 }
 
 /**
@@ -131,6 +133,11 @@ export class PostIngestService {
     const targets = resolveTargets(page.platforms, input.accounts, issues, (provider) =>
       providerEnabled(input.workspace, provider),
     );
+    // Plan limit (Phase 3): only new scheduling is refused; already-waiting rows keep their slot.
+    if (this.deps.postLimit && !pubs.some((p) => PUBLICATION_WAITING.includes(p.state))) {
+      const reason = await this.deps.postLimit(ctx.workspaceId);
+      if (reason) issues.push({ code: 'PLAN_LIMIT', message: reason });
+    }
 
     let schedule: ReturnType<typeof resolveSchedule> | null = null;
     if (!page.publishDate) {
@@ -202,7 +209,7 @@ export class PostIngestService {
       };
       const mediaRows = await this.deps.media.rowsFor(content.media.map((m) => m.assetId));
       for (const t of targets) {
-        const provider = this.deps.providers.get(t.provider);
+        const provider = this.deps.providers.get(providerIdOf(t.provider));
         const ref = accountRef(t.account);
         const rendered = enrichRenderedMedia(provider.render(snapshot, ref), mediaRows, t.provider);
         const validation = provider.validate(rendered, ref);

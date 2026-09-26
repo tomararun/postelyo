@@ -25,6 +25,10 @@ export interface WorkspaceSettings {
   notionWebhooks?: boolean;
   /** Per-workspace platform flags; a platform is usable only when the server has app credentials too. */
   providers?: Partial<Record<FlaggedProvider, boolean>>;
+  /** Phase 3: receives account notices (token expiry, re-auth) instead of the connecting admin. */
+  notificationEmail?: string;
+  /** Phase 3: gets a copy of operational alerts that concern this workspace. */
+  alertCopyEmail?: string;
 }
 
 export function readSettings(ws: Pick<Workspace, 'settings'>): WorkspaceSettings {
@@ -41,6 +45,12 @@ export function readSettings(ws: Pick<Workspace, 'settings'>): WorkspaceSettings
       if (typeof v === 'boolean') providers[p] = v;
     }
     out.providers = providers;
+  }
+  if (typeof raw.notificationEmail === 'string' && raw.notificationEmail.includes('@')) {
+    out.notificationEmail = raw.notificationEmail;
+  }
+  if (typeof raw.alertCopyEmail === 'string' && raw.alertCopyEmail.includes('@')) {
+    out.alertCopyEmail = raw.alertCopyEmail;
   }
   return out;
 }

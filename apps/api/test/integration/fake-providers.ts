@@ -276,6 +276,36 @@ export class FakeNotion {
       });
     }
 
+    if (path === '/search' && method === 'POST') {
+      const parsed = JSON.parse(body || '{}') as { filter?: { value?: string } };
+      const kind = parsed.filter?.value ?? 'page';
+      const results =
+        kind === 'database'
+          ? [
+              ...[...this.createdDatabases.values()].map((d) => ({
+                ...d,
+                last_edited_time: '2026-09-26T00:00:00.000Z',
+              })),
+              {
+                object: 'database',
+                id: '1f2e3d4c-5b6a-47f8-a9b0-c1d2e3f40506',
+                url: 'https://www.notion.so/1f2e3d4c5b6a47f8a9b0c1d2e3f40506',
+                title: [{ plain_text: 'Content Calendar' }],
+                last_edited_time: '2026-09-25T00:00:00.000Z',
+              },
+            ]
+          : [
+              {
+                object: 'page',
+                id: '1f2e3d4c-5b6a-47f8-a9b0-c1d2e3f40507',
+                url: 'https://www.notion.so/Marketing-1f2e3d4c5b6a47f8a9b0c1d2e3f40507',
+                last_edited_time: '2026-09-25T00:00:00.000Z',
+                properties: { title: { type: 'title', title: rt('Marketing') } },
+              },
+            ];
+      return json(200, { object: 'list', results, has_more: false, next_cursor: null });
+    }
+
     if (path === '/databases' && method === 'POST') {
       const parsed = JSON.parse(body || '{}') as {
         parent?: { page_id?: string };
@@ -593,6 +623,23 @@ export function createFakeProviders() {
       if (metaPagesStatus !== 200)
         return json(metaPagesStatus, { error: { code: 200, message: 'Requires pages_show_list' } });
       return json(200, { data: metaPages });
+    }
+
+    // --- Notion public OAuth (Phase 3) ---
+    if (url === 'https://api.notion.com/v1/oauth/token') {
+      if (!(headers['authorization'] ?? '').startsWith('Basic '))
+        return json(401, { error: 'unauthorized_client' });
+      const parsed = JSON.parse(body || '{}') as { code?: string };
+      if (parsed.code === 'notion-good') {
+        return json(200, {
+          access_token: NOTION_VALID_TOKEN,
+          bot_id: 'bot-1',
+          workspace_id: 'nws-1',
+          workspace_name: 'Acme Notion',
+          duplicated_template_id: null,
+        });
+      }
+      return json(400, { error: 'invalid_grant', error_description: 'bad code' });
     }
 
     // --- Notion API ---

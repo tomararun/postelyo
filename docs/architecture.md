@@ -116,9 +116,11 @@ Both talk to a single **PostgreSQL** database, which is also the **job queue** (
 
 | Component | Role | MVP notes |
 |-----------|------|-----------|
-| **Auth & workspace module** | Users, sessions, workspaces, memberships, roles. | Email magic link; one workspace per user at signup. |
-| **Connections module** | Stores encrypted credentials for Notion and social accounts; runs OAuth flows. | LinkedIn OAuth (personal profile only); Notion internal token. |
-| **Notifications module** | Sends the two MVP email types: operational alerts to the configured alert recipient; token-expiry/re-auth notices to the connecting admin. | Email only; recipient of alerts from `ALERT_EMAIL` config; per-workspace overrides reserved. |
+| **Auth & workspace module** | Users, sessions, workspaces, memberships, roles, invitations, workspace deletion. | Email magic link; a workspace per user at signup; Phase 3 adds invitations with hashed 7-day tokens, role changes with a last-owner rule, extra workspaces, soft delete + purge job. |
+| **Connections module** | Stores encrypted credentials for Notion and social accounts; runs OAuth flows. | LinkedIn, X and Meta OAuth; Notion by public OAuth (Phase 3, with a setup wizard that creates the template database or adopts an existing one) or by pasted internal token. |
+| **Notifications module** | Sends the two email types: operational alerts to the configured alert recipient; token-expiry/re-auth notices to the connecting admin. | Email only. Phase 3: `notificationEmail` overrides the account-notice recipient per workspace; `alertCopyEmail` receives a copy of alerts that concern the workspace. Alert routing itself stays global. |
+| **Billing module** (Phase 3) | Plans and limits, Stripe Checkout/Portal through a `BillingGateway`, signed webhook processing, usage metering from the audit stream, grace periods. | Limits enforced in services: accounts at connect time, members at invite time, posts per month at ingest (`PLAN_LIMIT`). |
+| **Web dashboard** (`apps/web`, Phase 3) | Next.js control plane for customers: sign-in, workspaces, setup wizard, connections, team, billing, posts, settings, invitations, legal pages. | Server components and server actions call the api's `/v1` endpoints with the visitor's cookie; Next rewrites proxy `/api/auth`, `/v1`, `/oauth`, `/webhooks`, `/media` so the browser sees one origin. No business logic in the web app. |
 | **ContentSource: Notion** | Polls the configured database, maps properties → `Post` draft, writes results back. | Polling every 60 s by default. |
 | **Posts module** | Canonical `Post` + `Publication` records, state machine, validation, content snapshot. | |
 | **Scheduler** | Finds due publications and enqueues publish jobs exactly once. | DB tick every 30 s. |
@@ -197,7 +199,8 @@ Tenant lifecycle in MVP: created at signup; soft-delete flag; hard delete via a 
 - **Magic-link email sign-in** (passwordless) in the MVP; Google OAuth sign-in as a fast follow.
 - **Server-side sessions** stored in Postgres, delivered as `HttpOnly; Secure; SameSite=Lax` cookies. No JWTs in the browser.
 - Session lifetime 30 days, rotated on privilege change; explicit sign-out revokes.
-- Roles per workspace: `owner`, `admin`, `editor`, `viewer` (MVP uses `owner` and `admin` only; the enum exists for the roadmap).
+- Roles per workspace: `owner`, `admin`, `editor`, `viewer`. Phase 3 uses all four: invitations carry a role, admins may grant up to `admin`, only owners grant `owner`, and the last owner can neither leave nor be demoted.
+- Phase 3: the dashboard (`apps/web`) is served on the same public origin and proxies `/api/auth/*` to the api, so the Better Auth cookie is shared without any token in the browser. Server components forward the cookie to the api; nothing about sessions changed.
 - CSRF protection on state-changing form posts (double-submit token or `Origin` check).
 
 ### 5.2 Machine access
@@ -584,7 +587,25 @@ POST /v1/workspaces/{id}/publications/{pid}/retry
 
 GET  /health/live   GET /health/ready
 POST /webhooks/notion/{sourceId}          (disabled by default in MVP)
+
+# Phase 3 (self-serve)
+POST /v1/workspaces                                          create another workspace (owner)
+DELETE /v1/workspaces/{id}                                   owner; 202, soft delete + purge job
+GET  /v1/workspaces/{id}/content-sources/notion/connect      -> 302 to Notion OAuth
+GET  /oauth/notion/callback
+GET  /v1/workspaces/{id}/content-sources/{sid}/setup         pages/databases the user shared
+POST /v1/workspaces/{id}/content-sources/{sid}/setup         { mode: create, parentPageId, title? } | { mode: existing, databaseId }
+GET  /v1/workspaces/{id}/members                             PATCH/DELETE .../members/{userId}
+GET  /v1/workspaces/{id}/invitations                         POST { email, role }; DELETE .../invitations/{iid}
+GET  /v1/invitations/{token}                                 peek (signed in); POST .../accept
+GET  /v1/workspaces/{id}/billing                             usage, limits, subscription, plans
+POST /v1/workspaces/{id}/billing/checkout { plan }           owner -> { url } (Stripe Checkout)
+POST /v1/workspaces/{id}/billing/portal                      owner -> { url } (Customer Portal)
+POST /webhooks/stripe                                        signed, idempotent
+GET  /privacy   GET /terms
 ```
+
+Plan-limit refusals answer `402 { code: "plan_limit" }`; the ingest path records a `PLAN_LIMIT` validation error on the post instead.
 
 ### 14.3 Internal module boundaries
 
@@ -690,6 +711,7 @@ Principles: tests for the publish path must cover crash points (before lease, af
 - Environments: `dev` (local), `staging` (same PaaS, own DB, fake provider by default), `production`.
 - Backups: provider's daily automated backups + weekly restore drill in staging.
 - Domain: `app.postelyo.com` (api + UI). TLS by the platform.
+- Phase 3: the dashboard is a second Fly app built from `apps/web/Dockerfile` (`output: standalone`). It owns the public hostname; `API_INTERNAL_URL` points at the api app's internal address and the api's `APP_BASE_URL` is set to the dashboard's origin so OAuth redirects, invitation links and Stripe return URLs land on the dashboard. The api's own pages remain reachable through the proxy as the operator fallback.
 
 ### 18.2 Deploy safety
 
@@ -775,3 +797,9 @@ Explicitly **not** done in the MVP: microservices, event bus, multi-region, Kube
 | D24 (2026-09-26) | Media stored once per workspace and content hash; variants derived per provider spec; local driver served by the api | Store per asset; stream from Notion at publish time | Instagram needs public URLs; hashing dedupes and makes retries cheap; the local driver keeps development Docker-free. |
 | D25 (2026-09-26) | Adapters live in the `publishing-core` package, resolved from source in dev/tests (`development` export condition) and from `dist` in production | Keep adapters in the api | Independent contract testing and future external contributions without a build step in the inner loop. |
 | D26 (2026-09-26) | Meta connect imports every managed Page and its Instagram account; X connects one profile per callback; any number of accounts per provider | One-per-provider rule | Agencies manage many Pages; the Notion `Platforms` option selects the target. |
+| D27 (2026-09-26) | Plan limits live in code and are enforced in services (accounts at connect, members at invite, posts at ingest); Stripe holds prices only | Limits in Stripe metadata; database constraints | Enforcement never needs a Stripe call; a failing limit is a validation error the user can read in Notion or the dashboard. |
+| D28 (2026-09-26) | Posts per month are metered from `audit_log` (`publication.state_changed` to `published`, UTC month) | Usage counter table | The audit stream already records every publish exactly once; nothing new to keep consistent. |
+| D29 (2026-09-26) | Without a subscription, `workspace.plan` is the source of truth (operator-granted plans); with one, Stripe's state decides and is synced into the column | Always derive from subscriptions | Pilots and partners get comped plans by setting one column; no fake subscriptions. |
+| D30 (2026-09-26) | The dashboard is a thin Next.js app calling the api over HTTP with the visitor's cookie; no shared Drizzle access | Shared database package used by both apps | One place enforces tenancy and limits; the web app cannot bypass RLS or plan checks, and the api stays the single deployable that owns data. |
+| D31 (2026-09-26) | Workspace deletion is soft delete now, purge by job after 10 minutes, audit anonymised by the FK (`workspace_id` set null) | Immediate hard delete | Cancels in-flight work cleanly, gives a short undo window for operators, keeps the audit trail without tenant attribution. |
+| D32 (2026-09-26) | Notion public OAuth creates a pending source (`status = disabled`, no database) that a setup step completes; the pasted-token path stays | Single-step connect requiring a database id up front | Users rarely know a database id; the wizard lists what they shared and creates the template for them. |

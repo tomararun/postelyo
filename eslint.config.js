@@ -3,7 +3,16 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/drizzle/**', '**/coverage/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/drizzle/**',
+      '**/coverage/**',
+      '**/.next/**',
+      'apps/web/next-env.d.ts',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
@@ -63,7 +72,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['**/*.js', '**/*.config.ts'],
+    files: ['**/*.js', '**/*.mjs', '**/*.config.ts'],
     ...tseslint.configs.disableTypeChecked,
   },
 );

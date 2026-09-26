@@ -63,6 +63,7 @@ Out of scope for MVP threat model: nation-state adversaries, hardware attacks, D
 - Sign-out deletes the session server-side. Changing email or role invalidates other sessions.
 - Rate limits: magic-link requests 5 / 15 min per email and per IP; OAuth start 10 / 15 min per user.
 - Google sign-in (roadmap) uses the same session model.
+- Phase 3: the dashboard (`apps/web`) runs on the public origin and proxies `/api/auth/*` to the api, so the same cookie serves both; server components forward it on every api call. Invitation links carry a random 256-bit token that is hashed at rest, expires after 7 days, and is single-use; accepting requires a signed-in session, and the invited email is shown but not enforced (the inviter chose the recipient).
 
 ---
 
@@ -76,13 +77,14 @@ Role per workspace membership: `owner > admin > editor > viewer`.
 |--------|-------|-------|--------|--------|
 | Manage workspace settings | ✓ | ✓ | | |
 | Connect/disconnect Notion & social accounts | ✓ | ✓ | | |
-| Invite/remove members (roadmap) | ✓ | ✓ | | |
+| Invite/remove members, change roles (owner role only by owners; last owner protected) | ✓ | ✓ | | |
+| Manage billing (Checkout, Customer Portal) | ✓ | | | |
 | Delete workspace | ✓ | | | |
 | View posts/publications | ✓ | ✓ | ✓ | ✓ |
 | Retry publication | ✓ | ✓ | ✓ | |
 | Create/edit posts natively (roadmap) | ✓ | ✓ | ✓ | |
 
-MVP creates only `owner`; the table is the contract for later.
+Sign-up creates an `owner`; invitations create the other roles (Phase 3). Any member may leave except the last owner. Plan limits are a second gate on top of roles: exceeding accounts, members or monthly posts answers `402 plan_limit` or a `PLAN_LIMIT` validation error.
 
 ### 4.2 Enforcement
 
@@ -106,6 +108,8 @@ An automated suite creates two workspaces with full data and asserts, for every 
 - Inbound webhooks (`/webhooks/notion`) are unauthenticated endpoints by nature: every delivery after the one-time verification handshake must carry a valid `X-Notion-Signature` (HMAC-SHA256 over the raw body with `NOTION_WEBHOOK_SECRET`, compared in constant time); payloads are capped at 64 KB; a valid event can only trigger a sync of a page we would poll anyway, never a publish. The verification token is logged once, on purpose, so the operator can configure it; it is the only secret ever written to a log.
 - Client secret lives only in the api process environment; the worker does not need it unless refreshing tokens (then it is present there too, never in the UI).
 - Disconnect calls the provider's revocation endpoint when one exists, wipes token columns, sets `disconnected_at`, audits.
+- Notion public OAuth (Phase 3) uses the same `oauth_state` model (`provider = notion`, `owner=user`); the token exchange authenticates with HTTP Basic client credentials from the api environment. The access token is sealed like any other credential; the pending source has no database until the setup step, and Notion search results are only ever shown to the workspace admin who connected.
+- Stripe webhooks (`/webhooks/stripe`, Phase 3) are verified with `Stripe.webhooks.constructEvent` over the raw body and `STRIPE_WEBHOOK_SECRET` (constant-time, 5-minute tolerance); unsigned or badly signed requests get 400. Event ids are inserted into `stripe_event` before processing, so replays are `duplicate`. Handlers never trust the payload for tenancy beyond the `workspaceId` metadata Postelyo itself set on Checkout, resolved through `billing_customer` when absent. Invalid events are recorded and ignored, never retried into a different tenant.
 
 ---
 
@@ -189,7 +193,7 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 
 - Data collected: user email/name, workspace settings, social account display metadata, content snapshots, publication results, audit trail.
 - Data minimisation: only the connected Notion database is read; only properties in the contract are parsed.
-- Deletion: disconnecting a source or account wipes credentials immediately; deleting a workspace queues a job that revokes tokens, deletes content and publications, and leaves an anonymised audit stub.
+- Deletion (built in Phase 3): disconnecting a source or account wipes credentials immediately; deleting a workspace soft-deletes it at once (hidden, API access ends, waiting publications cancelled, sources disabled) and the `workspace-delete` job purges it 10 minutes later: tokens revoked best-effort, the workspace row deleted with cascades, `audit_log.workspace_id` nulled by the FK, and two `workspace.deleted` audit entries (`requested`, `purged`) kept with counts only. See [compliance.md](./compliance.md) for the data inventory and platform checklists.
 - Content snapshots are retained for the lifetime of the publication for auditability; a per-workspace retention setting is a roadmap item.
 - Provider policies (LinkedIn API Terms, Notion terms) must be reviewed before public launch; the app must display which data it stores.
 
@@ -205,3 +209,5 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 - [ ] Migration reviewed for new tenant-owned tables having `workspace_id` + index **and an RLS policy** (add the table to `RLS_TABLES` so preflight and the suite check it)
 - [ ] New tenant-facing service methods run inside `withTenantScope`
 - [ ] New writeback properties reviewed against the allow-list
+- [ ] New limit-relevant resources (accounts, members, posts) go through the billing service's capacity checks
+- [ ] New Stripe event types handled idempotently and mapped in `stripe_event.outcome`

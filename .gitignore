@@ -11,3 +11,6 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 .data/
+.next/
+next-env.d.ts
+*.tsbuildinfo

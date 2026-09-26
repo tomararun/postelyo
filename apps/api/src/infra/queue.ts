@@ -1,5 +1,6 @@
 import { PgBoss } from 'pg-boss';
 import type {
+  DeleteWorkspaceJobData,
   JobEnqueuer,
   PublishJobData,
   SyncPageJobData,
@@ -17,6 +18,7 @@ export const JOB = {
   publish: 'publish',
   writeback: 'writeback',
   maintenance: 'maintenance',
+  workspaceDelete: 'workspace-delete',
 } as const;
 
 export type JobName = (typeof JOB)[keyof typeof JOB];
@@ -24,7 +26,12 @@ export type JobName = (typeof JOB)[keyof typeof JOB];
 /** Recurring ticks must never overlap. */
 const SINGLETON_QUEUES: readonly JobName[] = [JOB.notionSync, JOB.maintenance];
 /** One created + one active job per singleton key: duplicate sends are no-ops. */
-const STATELY_QUEUES: readonly JobName[] = [JOB.publish, JOB.writeback, JOB.notionSyncPage];
+const STATELY_QUEUES: readonly JobName[] = [
+  JOB.publish,
+  JOB.writeback,
+  JOB.notionSyncPage,
+  JOB.workspaceDelete,
+];
 
 const ONE_DAY_SECONDS = 24 * 60 * 60;
 
@@ -78,6 +85,18 @@ export class PgBossEnqueuer implements JobEnqueuer {
       retryDelay: 30,
       retryBackoff: true,
       expireInSeconds: 2 * 60,
+    });
+  }
+
+  async deleteWorkspace(data: DeleteWorkspaceJobData): Promise<void> {
+    await this.boss.send(JOB.workspaceDelete, data, {
+      singletonKey: data.workspaceId,
+      retryLimit: 5,
+      retryDelay: 60,
+      retryBackoff: true,
+      expireInSeconds: 10 * 60,
+      // Give the owner a moment to notice a mistake before the purge runs.
+      startAfter: new Date(Date.now() + 10 * 60_000),
     });
   }
 

@@ -3,6 +3,7 @@ import type { Logger } from '../infra/logger.js';
 import { JOB } from '../infra/queue.js';
 import { reportError } from '../infra/sentry.js';
 import type { NotionWebhookService } from '../modules/content-sources/notion/notion-webhook.service.js';
+import type { BillingService } from '../modules/billing/billing.service.js';
 import type { MediaService } from '../modules/media/media.service.js';
 import type { AlertService } from '../modules/ops/alerts.service.js';
 import type { DigestService } from '../modules/ops/digest.service.js';
@@ -21,6 +22,7 @@ export interface MaintenanceDeps {
   heartbeat: HeartbeatService;
   notionWebhooks: NotionWebhookService;
   media: MediaService;
+  billing: BillingService;
 }
 
 export async function runMaintenance(
@@ -37,6 +39,7 @@ export async function runMaintenance(
   await deps.heartbeat.prune();
   const webhooksPruned = await deps.notionWebhooks.prune();
   const mediaPruned = await deps.media.pruneUnreferenced();
+  const gracesExpired = await deps.billing.expireGracePeriods(correlationId);
   logger.info(
     {
       correlationId,
@@ -46,6 +49,7 @@ export async function runMaintenance(
       digest,
       webhooksPruned,
       mediaPruned,
+      gracesExpired,
       durationMs: Date.now() - started,
     },
     'maintenance run',

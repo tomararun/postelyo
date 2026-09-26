@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from 'fastify';
+import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   ValidationError,
@@ -6,6 +6,9 @@ import {
 } from '../../modules/workspaces/workspace.service.js';
 import type { Workspace } from '../../infra/db/schema.js';
 import { dailyCapFor, readSettings } from '../../modules/workspaces/settings.js';
+import { workspaceDefaultsFromEmail } from '../../modules/workspaces/slug.js';
+import type { WorkspaceDeletionService } from '../../modules/workspaces/workspace-deletion.service.js';
+import { requireUser } from '../plugins/auth.js';
 import { requireMembership } from '../plugins/tenancy.js';
 
 const patchSchema = z
@@ -23,11 +26,30 @@ const patchSchema = z
       })
       .strict()
       .optional(),
+    notificationEmail: z.string().nullable().optional(),
+    alertCopyEmail: z.string().nullable().optional(),
   })
   .strict();
 
+const createSchema = z
+  .object({ name: z.string().min(1).max(80), defaultTimezone: z.string().min(1).optional() })
+  .strict();
+
+function problem(
+  reply: FastifyReply,
+  req: FastifyRequest,
+  status: number,
+  title: string,
+  extra = {},
+) {
+  return reply
+    .status(status)
+    .type('application/problem+json')
+    .send({ type: 'about:blank', title, status, instance: req.url, ...extra });
+}
+
 /** Public DTO: never leaks internal columns beyond what the UI needs. */
-function toDto(w: Workspace) {
+export function workspaceDto(w: Workspace) {
   const settings = readSettings(w);
   return {
     id: w.id,
@@ -45,21 +67,55 @@ function toDto(w: Workspace) {
       facebook: settings.providers?.facebook === true,
       instagram: settings.providers?.instagram === true,
     },
+    notificationEmail: settings.notificationEmail ?? null,
+    alertCopyEmail: settings.alertCopyEmail ?? null,
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
   };
 }
 
-export const workspaceRoutes: FastifyPluginAsync<{ workspaces: WorkspaceService }> = async (
-  app,
-  opts,
-) => {
+export interface WorkspaceRoutesOptions {
+  workspaces: WorkspaceService;
+  deletion: WorkspaceDeletionService;
+}
+
+export const workspaceRoutes: FastifyPluginAsync<WorkspaceRoutesOptions> = async (app, opts) => {
   const { workspaces } = opts;
+
+  /** Any signed-in user may create another workspace (Phase 3 workspace switching). */
+  app.post('/v1/workspaces', { preHandler: requireUser }, async (req, reply) => {
+    const parsed = createSchema.safeParse(req.body ?? {});
+    if (!parsed.success) return problem(reply, req, 400, 'name is required (1–80 characters)');
+    const { slugBase } = workspaceDefaultsFromEmail(req.user!.email);
+    const slug = `${slugBase}-${
+      parsed.data.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '')
+        .slice(0, 30) || 'workspace'
+    }`;
+    try {
+      const ws = await workspaces.create(
+        {
+          name: parsed.data.name,
+          slugBase: slug,
+          defaultTimezone: parsed.data.defaultTimezone ?? 'UTC',
+        },
+        req.user!.id,
+        req.id,
+      );
+      return reply.status(201).send(workspaceDto(ws));
+    } catch (err) {
+      if (err instanceof ValidationError)
+        return problem(reply, req, 422, err.message, { issues: err.issues });
+      throw err;
+    }
+  });
 
   app.get(
     '/v1/workspaces/:workspaceId',
     { preHandler: requireMembership(workspaces, 'viewer') },
-    async (req) => toDto(await workspaces.get(req.tenant!)),
+    async (req) => workspaceDto(await workspaces.get(req.tenant!)),
   );
 
   app.patch(
@@ -73,20 +129,26 @@ export const workspaceRoutes: FastifyPluginAsync<{ workspaces: WorkspaceService 
         );
       }
       try {
-        return toDto(await workspaces.update(req.tenant!, parsed.data));
+        return workspaceDto(await workspaces.update(req.tenant!, parsed.data));
       } catch (err) {
         if (err instanceof ValidationError) {
-          return reply.status(422).type('application/problem+json').send({
-            type: 'about:blank',
-            title: 'Validation failed',
-            status: 422,
-            instance: req.url,
+          return problem(reply, req, 422, 'Validation failed', {
             code: 'validation_error',
             issues: err.issues,
           });
         }
         throw err;
       }
+    },
+  );
+
+  /** Owner only: soft delete now, purge by job (Phase 3). */
+  app.delete(
+    '/v1/workspaces/:workspaceId',
+    { preHandler: requireMembership(workspaces, 'owner') },
+    async (req, reply) => {
+      await opts.deletion.request(req.tenant!);
+      return reply.status(202).send({ status: 'deleting' });
     },
   );
 };

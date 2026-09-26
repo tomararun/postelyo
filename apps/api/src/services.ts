@@ -30,7 +30,15 @@ import {
 } from '@postelyo/publishing-core';
 import { xConfig } from './config/env.js';
 import { createStorage, type ObjectStorage } from './infra/storage/index.js';
+import { BillingService } from './modules/billing/billing.service.js';
+import {
+  FakeBillingGateway,
+  StripeGateway,
+  type BillingGateway,
+} from './modules/billing/gateway.js';
 import { XOAuthClient } from './modules/connections/x/x-oauth.js';
+import { InvitationService } from './modules/workspaces/invitation.service.js';
+import { WorkspaceDeletionService } from './modules/workspaces/workspace-deletion.service.js';
 import { ReconciliationService } from './modules/publishing/reconciliation.service.js';
 import { createProviderRegistry, type ProviderRegistry } from './modules/publishing/registry.js';
 import { SchedulerService } from './modules/scheduling/scheduler.service.js';
@@ -55,9 +63,16 @@ export interface ServiceDeps {
     | 'S3_ACCESS_KEY_ID'
     | 'S3_SECRET_ACCESS_KEY'
     | 'S3_PUBLIC_BASE_URL'
+    | 'STRIPE_SECRET_KEY'
+    | 'STRIPE_WEBHOOK_SECRET'
+    | 'STRIPE_PRICE_SOLO'
+    | 'STRIPE_PRICE_TEAM'
+    | 'STRIPE_PRICE_AGENCY'
   >;
   /** Overrides the storage built from env (tests). */
   storage?: ObjectStorage | undefined;
+  /** Overrides the Stripe gateway (tests use the fake; PROVIDER_MODE=fake without keys does too). */
+  billingGateway?: BillingGateway | undefined;
   db: Db;
   logger: Logger;
   keyProvider: KeyProvider;
@@ -72,6 +87,9 @@ export interface ServiceDeps {
 
 export interface Services {
   workspaces: WorkspaceService;
+  invitations: InvitationService;
+  deletion: WorkspaceDeletionService;
+  billing: BillingService;
   vault: CredentialVault;
   socialAccounts: SocialAccountService;
   contentSources: ContentSourceService;
@@ -142,12 +160,45 @@ export function buildServices(deps: ServiceDeps): Services {
     logger: deps.logger,
     ...fetchOpt,
   });
+  // Billing (Phase 3): Stripe when keys are present, otherwise the fake gateway in fake
+  // provider mode (development) and nothing in live mode (billing pages read-only).
+  const gateway =
+    deps.billingGateway ??
+    (deps.env.STRIPE_SECRET_KEY
+      ? new StripeGateway({ secretKey: deps.env.STRIPE_SECRET_KEY })
+      : deps.env.PROVIDER_MODE === 'fake'
+        ? new FakeBillingGateway()
+        : null);
+  const billing = new BillingService({
+    db: deps.db,
+    gateway,
+    config: {
+      prices: {
+        ...(deps.env.STRIPE_PRICE_SOLO ? { solo: deps.env.STRIPE_PRICE_SOLO } : {}),
+        ...(deps.env.STRIPE_PRICE_TEAM ? { team: deps.env.STRIPE_PRICE_TEAM } : {}),
+        ...(deps.env.STRIPE_PRICE_AGENCY ? { agency: deps.env.STRIPE_PRICE_AGENCY } : {}),
+      },
+      webhookSecret: deps.env.STRIPE_WEBHOOK_SECRET ?? null,
+      appBaseUrl: deps.env.APP_BASE_URL,
+    },
+    clock,
+    logger: deps.logger,
+  });
+  socialAccounts.registerCapacityGuard((workspaceId, adding) =>
+    billing.assertAccountCapacity(workspaceId, adding),
+  );
   const ingest = new PostIngestService({
     db: deps.db,
     providers,
     media,
     clock,
     logger: deps.logger,
+    postLimit: async (workspaceId) => {
+      const r = await billing.postLimitReached(workspaceId);
+      return r.reached
+        ? `The ${r.plan} plan allows ${r.limit} published posts per month and ${r.used} were already published. Upgrade the plan on the Billing page to schedule more this month.`
+        : null;
+    },
   });
   const notionSync = new NotionSyncService({
     db: deps.db,
@@ -198,6 +249,21 @@ export function buildServices(deps: ServiceDeps): Services {
     secret: deps.env.NOTION_WEBHOOK_SECRET ?? null,
   });
   const postQuery = new PostQueryService(deps.db, publications);
+  const invitations = new InvitationService({
+    db: deps.db,
+    mailer: deps.mailer,
+    billing,
+    clock,
+    appBaseUrl: deps.env.APP_BASE_URL,
+  });
+  const deletion = new WorkspaceDeletionService({
+    db: deps.db,
+    enqueue: deps.enqueue,
+    providers,
+    socialAccounts,
+    clock,
+    logger: deps.logger,
+  });
 
   const targets = new NotificationTargets(deps.db, deps.env.ALERT_EMAIL ?? null);
   const heartbeat = new HeartbeatService(deps.db, clock);
@@ -232,6 +298,9 @@ export function buildServices(deps: ServiceDeps): Services {
 
   return {
     workspaces,
+    invitations,
+    deletion,
+    billing,
     vault,
     socialAccounts,
     contentSources,

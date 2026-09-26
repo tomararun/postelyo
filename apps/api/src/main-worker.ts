@@ -11,6 +11,7 @@ import { registerNotionSyncPageJob } from './jobs/notion-sync-page.job.js';
 import { registerNotionSyncJob } from './jobs/notion-sync.job.js';
 import { registerPublishJob } from './jobs/publish.job.js';
 import { startSchedulerLoop } from './jobs/scheduler.job.js';
+import { registerWorkspaceDeleteJob } from './jobs/workspace-delete.job.js';
 import { registerWritebackJob } from './jobs/writeback.job.js';
 import { buildServices } from './services.js';
 import { installShutdown } from './shared/shutdown.js';
@@ -61,9 +62,11 @@ async function main(): Promise<void> {
       heartbeat: services.heartbeat,
       notionWebhooks: services.notionWebhooks,
       media: services.media,
+      billing: services.billing,
     },
     logger,
   );
+  await registerWorkspaceDeleteJob(boss, services.deletion, logger);
   const schedulerLoop = startSchedulerLoop(services.scheduler, logger);
 
   const startedAt = new Date();

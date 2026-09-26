@@ -7,7 +7,8 @@ import { recordAudit } from '../audit/audit.js';
 import type { CredentialReason, CredentialVault } from '../connections/credential-vault.js';
 import { ConnectionError } from '../connections/social-account.service.js';
 import type { TenantContext } from '../tenancy/tenant-context.js';
-import { NotionApiError, NotionClient } from './notion/notion-client.js';
+import { NotionApiError, NotionClient, type NotionSearchResult } from './notion/notion-client.js';
+import { TEMPLATE_TITLE, templateCreateBody } from './notion/notion-template.js';
 import {
   parseNotionDatabaseId,
   validateNotionDatabase,
@@ -36,12 +37,25 @@ export interface ContentSourceDto {
   lastError: string | null;
   connectedAt: Date;
   disconnectedAt: Date | null;
+  /** Phase 3 */
+  authKind: 'oauth' | 'token';
+  setupPending: boolean;
+  notionWorkspaceName: string | null;
 }
 
 interface NotionSourceConfig {
   propertyMap?: Record<string, string>;
   warnings?: SchemaIssue[];
   pollIntervalSeconds?: number;
+  /** Phase 3: `oauth` for the public integration, otherwise a pasted internal token. */
+  authKind?: 'oauth' | 'token';
+  notionBotId?: string;
+  notionWorkspaceId?: string | null;
+  notionWorkspaceName?: string | null;
+  duplicatedTemplateId?: string | null;
+  /** True between the OAuth callback and the setup wizard choosing a database. */
+  setupPending?: boolean;
+  setupMode?: 'create' | 'existing';
 }
 
 export function toContentSourceDto(s: ContentSource): ContentSourceDto {
@@ -57,6 +71,9 @@ export function toContentSourceDto(s: ContentSource): ContentSourceDto {
     lastError: s.lastError,
     connectedAt: s.createdAt,
     disconnectedAt: s.disconnectedAt,
+    authKind: cfg.authKind ?? 'token',
+    setupPending: cfg.setupPending === true,
+    notionWorkspaceName: cfg.notionWorkspaceName ?? null,
   };
 }
 
@@ -150,7 +167,10 @@ export class ContentSourceService {
             isNull(contentSource.disconnectedAt),
           ),
         );
-      const other = active.find((s) => s.externalDatabaseId !== databaseId);
+      // Pending OAuth sources (no database yet, status disabled) do not count as connected.
+      const other = active.find(
+        (s) => s.externalDatabaseId !== null && s.externalDatabaseId !== databaseId,
+      );
       if (other) {
         throw new ConnectionError(
           'already_connected',
@@ -228,6 +248,242 @@ export class ContentSourceService {
         },
       });
       return toContentSourceDto(row);
+    });
+  }
+
+  /**
+   * "Connect with Notion" (Phase 3): stores the OAuth bot token as a pending
+   * source (no database yet, status `disabled`) for the setup wizard to complete.
+   * Reconnecting the same Notion workspace refreshes the token of its source.
+   */
+  async connectNotionOAuth(
+    ctx: TenantContext,
+    tokens: {
+      accessToken: string;
+      botId: string;
+      workspaceId: string | null;
+      workspaceName: string | null;
+      duplicatedTemplateId: string | null;
+    },
+  ): Promise<ContentSourceDto> {
+    const userId = ctx.actor.type === 'user' ? ctx.actor.id : null;
+    const now = new Date();
+    return withTenantScope(this.deps.db, ctx.workspaceId, async (tx) => {
+      const rows = await tx
+        .select()
+        .from(contentSource)
+        .where(
+          and(
+            eq(contentSource.workspaceId, ctx.workspaceId),
+            eq(contentSource.kind, 'notion'),
+            isNull(contentSource.disconnectedAt),
+          ),
+        );
+      const existing = rows.find(
+        (s) => (s.config as NotionSourceConfig).notionBotId === tokens.botId,
+      );
+      const id = existing?.id ?? uuidv7();
+      const prevConfig = (existing?.config ?? {}) as NotionSourceConfig;
+      const config: NotionSourceConfig = {
+        ...prevConfig,
+        authKind: 'oauth',
+        notionBotId: tokens.botId,
+        notionWorkspaceId: tokens.workspaceId,
+        notionWorkspaceName: tokens.workspaceName,
+        duplicatedTemplateId: tokens.duplicatedTemplateId,
+        setupPending: existing?.externalDatabaseId ? false : true,
+      };
+      const values = {
+        credentialEnc: this.deps.vault.seal(
+          { entityType: 'content_source', entityId: id, column: 'credential' },
+          tokens.accessToken,
+        ),
+        credentialKeyId: this.deps.vault.currentKeyId,
+        config,
+        lastError: null,
+        connectedByUserId: userId,
+        updatedAt: now,
+      };
+      let row: ContentSource;
+      if (existing) {
+        const [updated] = await tx
+          .update(contentSource)
+          .set(values)
+          .where(eq(contentSource.id, existing.id))
+          .returning();
+        row = updated!;
+      } else {
+        const [inserted] = await tx
+          .insert(contentSource)
+          .values({
+            id,
+            workspaceId: ctx.workspaceId,
+            kind: 'notion',
+            status: 'disabled',
+            externalDatabaseId: null,
+            ...values,
+          })
+          .returning();
+        row = inserted!;
+      }
+      await recordAudit(tx, {
+        workspaceId: ctx.workspaceId,
+        actor: ctx.actor,
+        entityType: 'content_source',
+        entityId: row.id,
+        event: existing ? 'content_source.updated' : 'content_source.connected',
+        toState: row.status,
+        correlationId: ctx.correlationId,
+        data: {
+          kind: 'notion',
+          authKind: 'oauth',
+          notionWorkspaceName: tokens.workspaceName,
+          setupPending: config.setupPending,
+        },
+      });
+      return toContentSourceDto(row);
+    });
+  }
+
+  /** Setup wizard data: pages the integration can create the template in, and databases it could adopt. */
+  async setupOptions(
+    ctx: TenantContext,
+    sourceId: string,
+  ): Promise<{ pages: NotionSearchResult[]; databases: NotionSearchResult[] }> {
+    return this.withToken(ctx, sourceId, 'validate_connection', async (token) => {
+      const client = new NotionClient(token, { fetchImpl: this.deps.fetchImpl ?? fetch });
+      const [pages, databases] = await Promise.all([
+        client.search('page'),
+        client.search('database'),
+      ]);
+      return { pages, databases };
+    });
+  }
+
+  /**
+   * Completes a pending OAuth source: creates the template under `parentPageId`
+   * or validates and adopts `databaseId`, then activates the source.
+   */
+  async completeSetup(
+    ctx: TenantContext,
+    sourceId: string,
+    choice:
+      | { mode: 'create'; parentPageId: string; title?: string | undefined }
+      | { mode: 'existing'; databaseId: string },
+  ): Promise<ContentSourceDto> {
+    const source = await this.get(ctx, sourceId);
+    if (!source || source.disconnectedAt || source.kind !== 'notion' || !source.credentialEnc) {
+      throw new ConnectionError('not_found', 'content source not found');
+    }
+    if (source.externalDatabaseId) {
+      throw new ConnectionError(
+        'already_connected',
+        'This Notion connection is already set up. Disconnect it to start over.',
+      );
+    }
+    const result = await this.withToken(ctx, sourceId, 'validate_connection', async (token) => {
+      const client = new NotionClient(token, { fetchImpl: this.deps.fetchImpl ?? fetch });
+      let databaseId: string;
+      if (choice.mode === 'create') {
+        const parent = parseNotionDatabaseId(choice.parentPageId);
+        if (!parent) {
+          throw new ContentSourceValidationError(
+            'invalid_database_id',
+            'Choose a page to create the database in.',
+          );
+        }
+        try {
+          databaseId = (
+            await client.createDatabase(templateCreateBody(parent, choice.title ?? TEMPLATE_TITLE))
+          ).id;
+        } catch (err) {
+          if (err instanceof NotionApiError)
+            throw new ContentSourceValidationError('notion_error', err.message);
+          throw err;
+        }
+      } else {
+        const parsed = parseNotionDatabaseId(choice.databaseId);
+        if (!parsed)
+          throw new ContentSourceValidationError('invalid_database_id', 'Choose a database.');
+        databaseId = parsed;
+      }
+      let db;
+      try {
+        db = await client.retrieveDatabase(databaseId);
+      } catch (err) {
+        if (err instanceof NotionApiError)
+          throw new ContentSourceValidationError('notion_error', err.message);
+        throw err;
+      }
+      const validation = validateNotionDatabase(db);
+      if (!validation.ok) {
+        throw new ContentSourceValidationError(
+          'schema_invalid',
+          'The Notion database does not match the Postelyo template.',
+          validation.errors,
+        );
+      }
+      return { databaseId, db, validation };
+    });
+
+    return withTenantScope(this.deps.db, ctx.workspaceId, async (tx) => {
+      const others = await tx
+        .select()
+        .from(contentSource)
+        .where(
+          and(
+            eq(contentSource.workspaceId, ctx.workspaceId),
+            eq(contentSource.kind, 'notion'),
+            isNull(contentSource.disconnectedAt),
+            eq(contentSource.status, 'active'),
+          ),
+        );
+      const other = others.find(
+        (s) => s.id !== sourceId && s.externalDatabaseId !== result.databaseId,
+      );
+      if (other) {
+        throw new ConnectionError(
+          'already_connected',
+          `Another Notion database (${other.externalDatabaseTitle ?? other.externalDatabaseId}) is already connected. Disconnect it first.`,
+        );
+      }
+      const config: NotionSourceConfig = {
+        ...((source.config ?? {}) as NotionSourceConfig),
+        propertyMap: result.validation.propertyMap,
+        warnings: result.validation.warnings,
+        pollIntervalSeconds: 60,
+        setupPending: false,
+        setupMode: choice.mode,
+      };
+      const [row] = await tx
+        .update(contentSource)
+        .set({
+          status: 'active',
+          externalDatabaseId: result.databaseId,
+          externalDatabaseTitle: result.db.title || null,
+          config,
+          cursor: {},
+          lastError: null,
+          updatedAt: new Date(),
+        })
+        .where(eq(contentSource.id, sourceId))
+        .returning();
+      await recordAudit(tx, {
+        workspaceId: ctx.workspaceId,
+        actor: ctx.actor,
+        entityType: 'content_source',
+        entityId: sourceId,
+        event: 'content_source.setup_completed',
+        toState: 'active',
+        correlationId: ctx.correlationId,
+        data: {
+          mode: choice.mode,
+          databaseId: result.databaseId,
+          databaseTitle: result.db.title,
+          warnings: result.validation.warnings.map((w) => w.message),
+        },
+      });
+      return toContentSourceDto(row!);
     });
   }
 
