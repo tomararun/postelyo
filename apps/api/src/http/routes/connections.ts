@@ -36,7 +36,13 @@ const setupBody = z.discriminatedUnion('mode', [
       title: z.string().min(1).max(100).optional(),
     })
     .strict(),
-  z.object({ mode: z.literal('existing'), databaseId: z.string().min(1) }).strict(),
+  z
+    .object({
+      mode: z.literal('existing'),
+      databaseId: z.string().min(1),
+      ideasDatabaseId: z.string().min(1).optional(),
+    })
+    .strict(),
 ]);
 
 const notionBody = z.object({ token: z.string().min(1), database: z.string().min(1) }).strict();

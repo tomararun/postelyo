@@ -1,13 +1,17 @@
 import { and, eq, lte, or, sql } from 'drizzle-orm';
 import type { Db } from '../../infra/db/client.js';
 import {
+  campaign,
   post,
   publication,
   publishAttempt,
   socialAccount,
+  workspace,
   type Publication,
   type SocialAccount,
 } from '../../infra/db/schema.js';
+import type { LinkService } from '../links/link.service.js';
+import { readSettings } from '../workspaces/settings.js';
 import type { Logger } from '../../infra/logger.js';
 import type { Clock } from '../../shared/clock.js';
 import { uuidv7 } from '../../shared/ids.js';
@@ -43,7 +47,12 @@ export interface PublishEngineDeps {
   leaseMs?: number;
   providerTimeoutMs?: number;
   random?: () => number;
+  /** Phase 4: UTM presets and short links applied at render time. */
+  links?: LinkService;
 }
+
+/** First comments are retried this many times (immediately, then by maintenance). */
+export const MAX_FIRST_COMMENT_ATTEMPTS = 3;
 
 export const DEFAULT_LEASE_MS = 2 * 60_000;
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 30_000;
@@ -166,7 +175,40 @@ export class PublishEngine {
     // 3. Render, enrich media metadata, validate, publish.
     const provider = this.deps.providers.get(providerIdOf(account.provider));
     const ref = accountRef(account);
-    const content = postRow.content as CanonicalContent;
+    let content = postRow.content as CanonicalContent;
+    // Phase 4: links are rewritten per publication; codes are stable across retries.
+    if (this.deps.links) {
+      const [ws] = await db
+        .select({ settings: workspace.settings })
+        .from(workspace)
+        .where(eq(workspace.id, leased.workspaceId))
+        .limit(1);
+      const linkSettings = ws ? readSettings(ws).links : undefined;
+      if (linkSettings) {
+        const [c] = postRow.campaignId
+          ? await db
+              .select({ name: campaign.name })
+              .from(campaign)
+              .where(eq(campaign.id, postRow.campaignId))
+              .limit(1)
+          : [];
+        try {
+          content = (
+            await this.deps.links.apply(content, linkSettings, {
+              workspaceId: leased.workspaceId,
+              publicationId: leased.id,
+              platform: account.provider,
+              campaignName: c?.name ?? null,
+            })
+          ).content;
+        } catch (err) {
+          this.deps.logger.warn(
+            { err, publicationId: leased.id },
+            'link policy failed; publishing original links',
+          );
+        }
+      }
+    }
     const snapshot: PostSnapshot = {
       postId: postRow.id,
       workspaceId: postRow.workspaceId,
@@ -244,7 +286,149 @@ export class PublishEngine {
       this.deps.logger.error({ err, publicationId: leased.id }, 'publish engine internal error');
       result = { kind: 'ambiguous', reason: `internal error: ${(err as Error).message}` };
     }
-    return this.finish(ctx, leased, attemptId, result);
+    const outcome = await this.finish(ctx, leased, attemptId, result);
+    if (outcome === 'published' && result.kind === 'published') {
+      await this.postFirstComment(leased.id, correlationId);
+    }
+    return outcome;
+  }
+
+  /**
+   * Phase 4 first comment: posted once per publication after a successful
+   * publish. The publication outcome never depends on it; failures are
+   * recorded and retried a bounded number of times by maintenance.
+   */
+  async postFirstComment(
+    publicationId: string,
+    correlationId: string,
+  ): Promise<'posted' | 'failed' | 'skipped'> {
+    const { db } = this.deps;
+    const now = this.deps.clock.now();
+    const [claimed] = await db
+      .update(publication)
+      .set({
+        firstCommentState: 'posting',
+        firstCommentAttempts: sql`${publication.firstCommentAttempts} + 1`,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(publication.id, publicationId),
+          eq(publication.state, 'published'),
+          eq(publication.firstCommentState, 'pending'),
+          lte(publication.firstCommentAttempts, MAX_FIRST_COMMENT_ATTEMPTS - 1),
+        ),
+      )
+      .returning();
+    if (!claimed || !claimed.providerPostId) {
+      if (claimed) {
+        await db
+          .update(publication)
+          .set({
+            firstCommentState: 'failed',
+            firstCommentError: 'no provider post id',
+            updatedAt: now,
+          })
+          .where(eq(publication.id, publicationId));
+      }
+      return 'skipped';
+    }
+    const ctx = systemContext(claimed.workspaceId, 'first-comment', correlationId);
+    const [postRow] = await db.select().from(post).where(eq(post.id, claimed.postId)).limit(1);
+    const [account] = await db
+      .select()
+      .from(socialAccount)
+      .where(eq(socialAccount.id, claimed.socialAccountId))
+      .limit(1);
+    const text = ((postRow?.content as CanonicalContent | undefined)?.firstComment ?? '').trim();
+    const provider = account ? this.deps.providers.get(providerIdOf(account.provider)) : null;
+    const settle = async (
+      state: 'posted' | 'failed' | 'pending',
+      extra: { firstCommentId?: string | null; firstCommentError?: string | null },
+    ) => {
+      await db
+        .update(publication)
+        .set({ firstCommentState: state, ...extra, updatedAt: this.deps.clock.now() })
+        .where(eq(publication.id, publicationId));
+    };
+    if (
+      !account ||
+      !provider?.comment ||
+      !provider.capabilities().firstComment ||
+      text.length === 0
+    ) {
+      await settle('failed', { firstCommentError: 'first comment not supported for this account' });
+      return 'failed';
+    }
+    let result: Awaited<ReturnType<NonNullable<typeof provider.comment>>>;
+    try {
+      result = await this.deps.socialAccounts.withAccessToken(
+        ctx,
+        account.id,
+        'publish',
+        (accessToken) =>
+          provider.comment!(
+            {
+              publicationId,
+              account: accountRef(account),
+              providerPostId: claimed.providerPostId!,
+              text,
+            },
+            { credentials: { accessToken }, correlationId, timeoutMs: this.providerTimeoutMs },
+          ),
+      );
+    } catch (err) {
+      result = {
+        kind: 'failed',
+        reason: `internal error: ${(err as Error).message}`,
+        retryable: false,
+      };
+    }
+    if (result.kind === 'posted') {
+      await settle('posted', { firstCommentId: result.commentId, firstCommentError: null });
+    } else if (result.retryable && claimed.firstCommentAttempts + 1 < MAX_FIRST_COMMENT_ATTEMPTS) {
+      await settle('pending', { firstCommentError: result.reason });
+    } else {
+      await settle('failed', { firstCommentError: result.reason });
+    }
+    await recordAudit(db, {
+      workspaceId: ctx.workspaceId,
+      actor: ctx.actor,
+      entityType: 'publication',
+      entityId: publicationId,
+      event: 'publication.first_comment',
+      correlationId,
+      data: {
+        outcome: result.kind,
+        ...(result.kind === 'posted'
+          ? { commentId: result.commentId }
+          : { reason: result.reason, retryable: result.retryable }),
+        attempt: claimed.firstCommentAttempts + 1,
+      },
+    });
+    // The writeback describes the comment too; a second enqueue is a no-op while the first is queued.
+    await this.deps.enqueue.writeback({ publicationId }).catch(() => undefined);
+    return result.kind === 'posted' ? 'posted' : 'failed';
+  }
+
+  /** Maintenance: first comments still pending after a retryable failure. */
+  async retryPendingComments(correlationId: string): Promise<number> {
+    const rows = await this.deps.db
+      .select({ id: publication.id })
+      .from(publication)
+      .where(
+        and(
+          eq(publication.state, 'published'),
+          eq(publication.firstCommentState, 'pending'),
+          lte(publication.firstCommentAttempts, MAX_FIRST_COMMENT_ATTEMPTS - 1),
+        ),
+      )
+      .limit(50);
+    let n = 0;
+    for (const r of rows) {
+      if ((await this.postFirstComment(r.id, `${correlationId}:fc`)) === 'posted') n += 1;
+    }
+    return n;
   }
 
   private async finish(

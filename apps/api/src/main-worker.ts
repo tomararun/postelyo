@@ -63,6 +63,7 @@ async function main(): Promise<void> {
       notionWebhooks: services.notionWebhooks,
       media: services.media,
       billing: services.billing,
+      engine: services.engine,
     },
     logger,
   );

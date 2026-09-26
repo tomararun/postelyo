@@ -30,6 +30,16 @@ export interface SourcePost {
   timeZone: string | null;
   /** Per-platform text overrides by provider id (Phase 2), plain text; empty ones omitted. */
   platformText: Record<string, string>;
+  /** Phase 4: ids of related Campaigns pages (`Campaign` relation). */
+  campaignIds: string[];
+  /** Phase 4: `Repeat` option as written, e.g. `Weekly`, `Evergreen`; null when unset or absent. */
+  repeat: string | null;
+  /** Phase 4: `Repeat Until` date (YYYY-MM-DD) or null. */
+  repeatUntil: string | null;
+  /** Phase 4: source page ids of a generated instance (`Repeat Of` relation). */
+  repeatOf: string[];
+  /** Phase 4: plain text of `First Comment`; empty when absent. */
+  firstComment: string;
   /** Current values of system-owned properties, used to patch only on change. */
   system: {
     postelyoStatus: string | null;
@@ -39,6 +49,10 @@ export interface SourcePost {
     postelyoId: string;
     /** Plain text of the optional `Published URLs` property (null when the column is absent). */
     publishedUrls: string | null;
+    /** Phase 4: current `Approval` select (null when unset or the column is absent). */
+    approval: string | null;
+    /** Phase 4: plain text of `Link Report` (null when the column is absent). */
+    linkReport: string | null;
   };
 }
 
@@ -76,6 +90,15 @@ export function mapPage(page: NotionPage, map: PropertyMap): SourcePost {
     if (text.length > 0) platformText[providerId] = text;
   }
 
+  const relationIds = (v: unknown): string[] =>
+    Array.isArray(v)
+      ? v.map((r) => asRecord(r)['id']).filter((id): id is string => typeof id === 'string')
+      : [];
+  const repeatProp = prop('Repeat');
+  const repeat = asRecord(repeatProp['select'] ?? repeatProp['status']);
+  const repeatUntil = asRecord(prop('Repeat Until')['date']);
+  const approvalProp = asRecord(prop('Approval')['select']);
+
   const media: SourceMediaFile[] = Array.isArray(mediaRaw)
     ? mediaRaw.flatMap((f) => {
         const r = asRecord(f);
@@ -112,6 +135,12 @@ export function mapPage(page: NotionPage, map: PropertyMap): SourcePost {
         ? ((asRecord(tzProp['select'])['name'] as string | undefined) ?? null)
         : richTextToPlain(tzProp['rich_text']) || null,
     platformText,
+    campaignIds: relationIds(prop('Campaign')['relation']),
+    repeat: typeof repeat['name'] === 'string' ? repeat['name'] : null,
+    repeatUntil:
+      typeof repeatUntil['start'] === 'string' ? repeatUntil['start'].slice(0, 10) : null,
+    repeatOf: relationIds(prop('Repeat Of')['relation']),
+    firstComment: richTextToPlain(prop('First Comment')['rich_text']).trim(),
     system: {
       postelyoStatus: typeof psStatus['name'] === 'string' ? psStatus['name'] : null,
       postelyoNote: richTextToPlain(prop('Postelyo Note')['rich_text']),
@@ -124,6 +153,8 @@ export function mapPage(page: NotionPage, map: PropertyMap): SourcePost {
       publishedUrls: map['Published URLs']
         ? richTextToPlain(prop('Published URLs')['rich_text'])
         : null,
+      approval: typeof approvalProp['name'] === 'string' ? approvalProp['name'] : null,
+      linkReport: map['Link Report'] ? richTextToPlain(prop('Link Report')['rich_text']) : null,
     },
   };
 }
@@ -253,6 +284,7 @@ export function buildCanonicalContent(input: BuildContentInput): MappedContent {
     ...(Object.keys(input.page.platformText ?? {}).length > 0
       ? { platformText: input.page.platformText }
       : {}),
+    ...(input.page.firstComment ? { firstComment: input.page.firstComment } : {}),
     meta: { source: 'notion', sourcePageId: input.page.externalId },
   };
   const plainLength = blocks
@@ -284,6 +316,70 @@ function splitParagraphs(inlines: InlineNode[]): BlockNode[] {
     });
   }
   return paragraphs.filter((p) => p.length > 0).map((inl) => ({ type: 'paragraph', inlines: inl }));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: copying pages (recurring instances, promoted ideas)
+// ---------------------------------------------------------------------------
+
+const COPYABLE_BLOCKS = new Set([
+  'paragraph',
+  'heading_1',
+  'heading_2',
+  'heading_3',
+  'bulleted_list_item',
+  'numbered_list_item',
+  'quote',
+  'callout',
+  'divider',
+  'to_do',
+]);
+
+/** Read-side rich text → the write-side shape Notion accepts on create/append. */
+export function richTextForWrite(v: unknown): unknown[] {
+  if (!Array.isArray(v)) return [];
+  const out: unknown[] = [];
+  for (const item of v) {
+    const r = asRecord(item);
+    const text = typeof r['plain_text'] === 'string' ? r['plain_text'] : '';
+    if (text.length === 0) continue;
+    const ann = asRecord(r['annotations']);
+    const href = typeof r['href'] === 'string' ? r['href'] : null;
+    out.push({
+      type: 'text',
+      text: { content: text.slice(0, 2000), ...(href ? { link: { url: href } } : {}) },
+      annotations: {
+        bold: ann['bold'] === true,
+        italic: ann['italic'] === true,
+        strikethrough: ann['strikethrough'] === true,
+        underline: ann['underline'] === true,
+        code: ann['code'] === true,
+        color: typeof ann['color'] === 'string' ? ann['color'] : 'default',
+      },
+    });
+  }
+  return out;
+}
+
+/** Page body blocks as returned by the API → block objects for `children`; unsupported types are dropped. */
+export function blocksForWrite(blocks: NotionBlock[]): unknown[] {
+  const out: unknown[] = [];
+  for (const b of blocks) {
+    if (!COPYABLE_BLOCKS.has(b.type)) continue;
+    if (b.type === 'divider') {
+      out.push({ object: 'block', type: 'divider', divider: {} });
+      continue;
+    }
+    const value: Record<string, unknown> = { rich_text: richTextForWrite(b.value['rich_text']) };
+    if (b.type === 'to_do') value['checked'] = b.value['checked'] === true;
+    if (b.type === 'callout') {
+      const icon = asRecord(b.value['icon']);
+      if (icon['type'] === 'emoji' && typeof icon['emoji'] === 'string')
+        value['icon'] = { type: 'emoji', emoji: icon['emoji'] };
+    }
+    out.push({ object: 'block', type: b.type, [b.type]: value });
+  }
+  return out;
 }
 
 export function hashContent(content: CanonicalContent): string {

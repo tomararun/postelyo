@@ -15,6 +15,7 @@ import type { ContentSourceService } from '../content-source.service.js';
 import { NotionApiError, NotionClient } from './notion-client.js';
 import { mapPage, type PropertyMap } from './notion-mapper.js';
 import { POSTELYO_STATUS, writebackPatch, type DesiredWriteback } from './notion-writeback.js';
+import type { LinkService } from '../../links/link.service.js';
 
 export interface ResultWritebackDeps {
   db: Db;
@@ -22,6 +23,8 @@ export interface ResultWritebackDeps {
   clock: Clock;
   logger: Logger;
   fetchImpl?: typeof fetch;
+  /** Phase 4: tracked links reported in `Link Report`. */
+  links?: LinkService;
 }
 
 export type WritebackOutcome = 'done' | 'skipped' | 'unchanged';
@@ -68,6 +71,16 @@ export class ResultWritebackService {
         ? desiredForPost(siblings.map((s) => ({ ...s.pub, accountName: s.accountName })))
         : desiredFor(pub);
     if (!desired) return this.markDone(pub.id, 'skipped');
+    // Phase 4: tracked links of every sibling, with click counts at writeback time.
+    if (this.deps.links) {
+      const lines: string[] = [];
+      for (const s of siblings) {
+        for (const l of await this.deps.links.forPublication(s.pub.id)) {
+          lines.push(`${this.deps.links.shortUrl(l.code)} → ${l.targetUrl} (${l.clicks} clicks)`);
+        }
+      }
+      if (lines.length > 0) desired.linkReport = lines.join('\n');
+    }
 
     const ctx = systemContext(pub.workspaceId, 'writeback', correlationId);
     const map: PropertyMap = (source.config as { propertyMap?: PropertyMap }).propertyMap ?? {};
@@ -172,9 +185,10 @@ export function desiredFor(pub: Publication): DesiredWriteback | null {
       const late = (pub.delaySeconds ?? 0) > LATE_THRESHOLD_SECONDS;
       const publishedAt = pub.publishedAt ?? new Date();
       const publishedLocal = formatLocal(publishedAt, pub.scheduledTz);
-      const note = late
-        ? `Scheduled ${pub.scheduledLocal}, published ${publishedLocal} (${Math.round((pub.delaySeconds ?? 0) / 60)} min late, ${pub.scheduledTz}).`
-        : `Published ${publishedLocal} (${pub.scheduledTz}).`;
+      const note =
+        (late
+          ? `Scheduled ${pub.scheduledLocal}, published ${publishedLocal} (${Math.round((pub.delaySeconds ?? 0) / 60)} min late, ${pub.scheduledTz}).`
+          : `Published ${publishedLocal} (${pub.scheduledTz}).`) + commentSuffix(pub);
       return {
         postelyoStatus: late ? POSTELYO_STATUS.publishedLate : POSTELYO_STATUS.published,
         postelyoNote: note,
@@ -223,11 +237,26 @@ export function publicationLabel(
 }
 
 /** One line per publication for the note. */
+/** Phase 4: how the first comment went, appended to a published line. */
+function commentSuffix(p: Pick<Publication, 'firstCommentState' | 'firstCommentError'>): string {
+  switch (p.firstCommentState) {
+    case 'posted':
+      return ' First comment posted.';
+    case 'failed':
+      return ` First comment failed: ${p.firstCommentError ?? 'unknown error'}.`;
+    case 'pending':
+    case 'posting':
+      return ' First comment pending.';
+    default:
+      return '';
+  }
+}
+
 function lineFor(p: PubWithAccount): string {
   const at = (d: Date | null) => (d ? `${formatLocal(d, p.scheduledTz)} (${p.scheduledTz})` : '');
   switch (p.state) {
     case 'published':
-      return `${publicationLabel(p)}: published ${at(p.publishedAt)}${(p.delaySeconds ?? 0) > LATE_THRESHOLD_SECONDS ? `, ${Math.round((p.delaySeconds ?? 0) / 60)} min late` : ''}.`;
+      return `${publicationLabel(p)}: published ${at(p.publishedAt)}${(p.delaySeconds ?? 0) > LATE_THRESHOLD_SECONDS ? `, ${Math.round((p.delaySeconds ?? 0) / 60)} min late` : ''}.${commentSuffix(p)}`;
     case 'failed':
       return `${publicationLabel(p)}: failed: ${p.lastErrorMessage ?? p.lastErrorCode ?? 'unknown error'}`;
     case 'ambiguous':

@@ -81,6 +81,24 @@ Goal: a stranger signs up, connects Notion and their socials, invites their team
 
 ---
 
+## Phase 4 – Content operations in Notion (built 2026-09-26)
+
+Goal: the Notion database becomes the content calendar and operations hub. Product plan: [product-roadmap.md](./product-roadmap.md) Phase 4; contract: [notion-template.md](./notion-template.md) v2.
+
+| Item | Notes | Hook | Status |
+|------|-------|------|--------|
+| Template v2 | Additive columns (`Campaign`, `Repeat`, `Repeat Until`, `First Comment`, system `Repeat Of`, `Approval`, `Link Report`), Campaigns and Ideas databases, relations wired after creation, duplicated-template detection in the wizard, v1 upgrade path | `NOTION_CONTRACT`, `createTemplateSuite` | Done · views only via the duplicated template (D33) |
+| Campaigns | `campaign` table, `post.campaign_id`, summary writeback on change | §7.4 | Done |
+| Recurring and evergreen | Instances as real pages with provenance, propagation to unedited future instances, evergreen slots with minimum gap | `series.service.ts` | Done |
+| First comment | Provider capability + contract test; LinkedIn, X, Facebook, Instagram, fake; bounded retries from maintenance | `PublishingProvider.comment` | Done · live verification with each platform pending |
+| Links | UTM presets with placeholders, short links on our domain with click counts, `Link Report` | `short_link`, `/l/{code}` | Done · Bitly deferred |
+| Approval enforcement | Opt-in policy, reviewers, fingerprint-bound approvals, `APPROVAL_REQUIRED`, Notion mirror | `approval` | Done |
+| Ideas | Promotion to draft with link back | `idea.service.ts` | Done |
+
+Deferred: best-time suggestions (Phase 5 analytics), bulk CSV import (Notion-native), Bitly.
+
+---
+
 ## Later – Intelligence and growth
 
 | Item | Notes | Hook |

@@ -5,6 +5,7 @@ import {
   templateCoversContract,
   templateCreateBody,
   templateProperties,
+  templateRelationProperties,
 } from './notion-template.js';
 
 /** Turns the create-request property definitions into what Notion echoes back. */
@@ -19,6 +20,11 @@ function asDatabase(): NotionDatabase {
       type,
       ...(cfg?.options ? { options: cfg.options.map((o) => ({ name: o.name })) } : {}),
     };
+  }
+  // Relations are added after creation (Phase 4); Notion echoes them with the target database.
+  for (const [name, def] of Object.entries(templateRelationProperties('tmpl', 'camp'))) {
+    const rel = (def as { relation: { database_id: string } }).relation;
+    properties[name] = { id: name, name, type: 'relation', relationDatabaseId: rel.database_id };
   }
   return { id: 'tmpl', title: 'Postelyo Content', properties };
 }

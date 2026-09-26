@@ -16,6 +16,9 @@ import type { ContentSourceService } from '../content-source.service.js';
 import { NotionApiError, NotionClient, type NotionPage } from './notion-client.js';
 import { mapPage, type PropertyMap } from './notion-mapper.js';
 import { writebackPatch } from './notion-writeback.js';
+import type { CampaignService } from '../../campaigns/campaign.service.js';
+import type { IdeaService } from '../../posts/idea.service.js';
+import type { SeriesService } from '../../posts/series.service.js';
 
 export interface SyncSummary {
   sourceId: string;
@@ -25,6 +28,17 @@ export interface SyncSummary {
   writebacks: number;
   errors: string[];
   cursor: string | null;
+  /** Phase 4 companions (campaigns, series, evergreen, ideas), when enabled. */
+  extras?: {
+    campaignsSeen: number;
+    summariesWritten: number;
+    instancesCreated: number;
+    instancesUpdated: number;
+    evergreenFilled: number;
+    ideasSeen: number;
+    promoted: number;
+    warnings: string[];
+  };
 }
 
 interface SyncCursor {
@@ -38,6 +52,10 @@ export interface NotionSyncDeps {
   logger: Logger;
   clock: Clock;
   fetchImpl?: typeof fetch;
+  /** Phase 4 */
+  campaigns?: CampaignService;
+  series?: SeriesService;
+  ideas?: IdeaService;
 }
 
 function emptySummary(sourceId: string, workspaceId: string): SyncSummary {
@@ -218,8 +236,18 @@ export class NotionSyncService {
         } while (next && summary.pagesSeen < MAX_PAGES_PER_RUN);
 
         await this.verifyScheduledPages(ctx, source, ws, accounts, map, client, seen, summary);
+        summary.extras = await this.runCompanions(ctx, source, ws, map, client);
 
-        const newCursor: SyncCursor = maxEdited ? { lastEditedAfter: maxEdited } : {};
+        // Companion services keep their own cursor keys; merge rather than replace.
+        const [fresh] = await this.deps.db
+          .select({ cursor: contentSource.cursor })
+          .from(contentSource)
+          .where(eq(contentSource.id, sourceId))
+          .limit(1);
+        const merged = { ...((fresh?.cursor ?? {}) as Record<string, unknown>) };
+        if (maxEdited) merged['lastEditedAfter'] = maxEdited;
+        else delete merged['lastEditedAfter'];
+        const newCursor = merged;
         summary.cursor = maxEdited;
         await this.deps.db
           .update(contentSource)
@@ -267,6 +295,56 @@ export class NotionSyncService {
       });
     }
     return summary;
+  }
+
+  /** Phase 4: campaigns, recurring/evergreen instances and idea promotion, each isolated. */
+  private async runCompanions(
+    ctx: TenantContext,
+    source: ContentSource,
+    ws: typeof workspace.$inferSelect,
+    map: PropertyMap,
+    client: NotionClient,
+  ): Promise<NonNullable<SyncSummary['extras']>> {
+    const extras: NonNullable<SyncSummary['extras']> = {
+      campaignsSeen: 0,
+      summariesWritten: 0,
+      instancesCreated: 0,
+      instancesUpdated: 0,
+      evergreenFilled: 0,
+      ideasSeen: 0,
+      promoted: 0,
+      warnings: [],
+    };
+    if (this.deps.campaigns) {
+      try {
+        const r = await this.deps.campaigns.syncFromNotion(ctx, source, client);
+        extras.campaignsSeen = r.campaignsSeen;
+        extras.summariesWritten = r.summariesWritten;
+      } catch (err) {
+        if (err instanceof NotionApiError && err.code === 'unauthorized') throw err;
+        extras.warnings.push(`campaigns: ${(err as Error).message}`);
+        this.deps.logger.warn({ err, sourceId: source.id }, 'campaign sync failed');
+      }
+    }
+    if (this.deps.series) {
+      const r = await this.deps.series.run(ctx, source, ws, map, client);
+      extras.instancesCreated = r.instancesCreated;
+      extras.instancesUpdated = r.instancesUpdated;
+      extras.evergreenFilled = r.evergreenFilled;
+      extras.warnings.push(...r.warnings);
+    }
+    if (this.deps.ideas) {
+      try {
+        const r = await this.deps.ideas.syncFromNotion(ctx, source, client);
+        extras.ideasSeen = r.ideasSeen;
+        extras.promoted = r.promoted;
+      } catch (err) {
+        if (err instanceof NotionApiError && err.code === 'unauthorized') throw err;
+        extras.warnings.push(`ideas: ${(err as Error).message}`);
+        this.deps.logger.warn({ err, sourceId: source.id }, 'idea sync failed');
+      }
+    }
+    return extras;
   }
 
   private async processPage(

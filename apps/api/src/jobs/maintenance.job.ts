@@ -10,6 +10,7 @@ import type { DigestService } from '../modules/ops/digest.service.js';
 import type { HeartbeatService } from '../modules/ops/heartbeat.service.js';
 import type { TokenExpiryService } from '../modules/ops/token-expiry.service.js';
 import type { ReconciliationService } from '../modules/publishing/reconciliation.service.js';
+import type { PublishEngine } from '../modules/publishing/engine.js';
 
 /** Every 5 minutes: reconciliation, alert evaluation, token lifecycle notices, daily digest, housekeeping. */
 export const MAINTENANCE_CRON = '*/5 * * * *';
@@ -23,6 +24,8 @@ export interface MaintenanceDeps {
   notionWebhooks: NotionWebhookService;
   media: MediaService;
   billing: BillingService;
+  /** Phase 4: pending first comments are retried here. */
+  engine?: PublishEngine;
 }
 
 export async function runMaintenance(
@@ -40,6 +43,7 @@ export async function runMaintenance(
   const webhooksPruned = await deps.notionWebhooks.prune();
   const mediaPruned = await deps.media.pruneUnreferenced();
   const gracesExpired = await deps.billing.expireGracePeriods(correlationId);
+  const commentsPosted = deps.engine ? await deps.engine.retryPendingComments(correlationId) : 0;
   logger.info(
     {
       correlationId,
@@ -50,6 +54,7 @@ export async function runMaintenance(
       webhooksPruned,
       mediaPruned,
       gracesExpired,
+      commentsPosted,
       durationMs: Date.now() - started,
     },
     'maintenance run',

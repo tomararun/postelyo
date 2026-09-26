@@ -1,4 +1,6 @@
 import type {
+  CommentInput,
+  CommentResult,
   PostSnapshot,
   ProviderCapabilities,
   ProviderContext,
@@ -17,7 +19,7 @@ import {
   validateAgainstCapabilities,
 } from '../../render.js';
 import { asRecord, classifyNetworkError, parseJson, rawOf, str } from '../shared/graph-errors.js';
-import { GRAPH_URL, classifyGraph, form } from './graph.js';
+import { GRAPH_URL, classifyGraph, form, graphComment } from './graph.js';
 
 /**
  * Facebook Pages adapter (Phase 2): posts to a Page's feed with the Page
@@ -50,6 +52,7 @@ export class FacebookProvider implements PublishingProvider {
       maxImages: 1,
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: FACEBOOK_MAX_IMAGE_BYTES,
+      firstComment: true,
       image: { delivery: 'url', outputMimeType: 'image/jpeg', maxWidth: 2048 },
     };
   }
@@ -126,6 +129,11 @@ export class FacebookProvider implements PublishingProvider {
       };
     }
     return classifyGraph(res, text, raw, 'Facebook', true);
+  }
+
+  /** First comment under the Page post (`/{post-id}/comments`). */
+  async comment(input: CommentInput, ctx: ProviderContext): Promise<CommentResult> {
+    return graphComment(this.fetchImpl, this.graphUrl, input, ctx, 'Facebook');
   }
 
   async lookupRecent(

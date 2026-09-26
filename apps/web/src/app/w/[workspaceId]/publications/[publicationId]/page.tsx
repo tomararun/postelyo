@@ -22,6 +22,10 @@ interface Detail {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   writebackState: string;
+  firstCommentState: string | null;
+  firstCommentId: string | null;
+  firstCommentError: string | null;
+  links: { shown: string; target: string; clicks: number }[];
   attempts: {
     cycleNo: number;
     attemptNo: number;
@@ -115,6 +119,41 @@ export default async function PublicationPage({
             <dt className="text-[var(--muted)]">Notion writeback</dt>
             <dd>{pub.writebackState}</dd>
           </div>
+          {pub.firstCommentState && (
+            <div>
+              <dt className="text-[var(--muted)]">First comment</dt>
+              <dd>
+                <Badge
+                  tone={
+                    pub.firstCommentState === 'posted'
+                      ? 'success'
+                      : pub.firstCommentState === 'failed'
+                        ? 'danger'
+                        : 'warning'
+                  }
+                >
+                  {pub.firstCommentState}
+                </Badge>{' '}
+                {pub.firstCommentError && (
+                  <span className="text-[var(--danger)]">{pub.firstCommentError}</span>
+                )}
+              </dd>
+            </div>
+          )}
+          {pub.links.length > 0 && (
+            <div className="sm:col-span-2">
+              <dt className="text-[var(--muted)]">Tracked links</dt>
+              <dd>
+                <ul className="space-y-1 text-xs">
+                  {pub.links.map((l) => (
+                    <li key={l.shown}>
+                      <code>{l.shown}</code> → {l.target} <Badge>{l.clicks} clicks</Badge>
+                    </li>
+                  ))}
+                </ul>
+              </dd>
+            </div>
+          )}
           {pub.lastErrorCode && (
             <div className="sm:col-span-2">
               <dt className="text-[var(--muted)]">Last error</dt>

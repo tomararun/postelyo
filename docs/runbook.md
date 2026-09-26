@@ -80,6 +80,11 @@ Per-workspace counts of published, failed, needs-review, accounts needing re-aut
 | Comp a plan (pilot, partner) with no Stripe subscription | `update workspace set plan = 'team' where id = '...'` (any of `free`, `solo`, `team`, `agency`); takes effect immediately, overridden the moment a Stripe subscription exists | operator |
 | Upgrade / manage billing | Dashboard → Billing → *Upgrade* (Stripe Checkout) / *Manage billing* (Customer Portal) | owner |
 | Route account notices or copy alerts to another address | Dashboard → Settings, or `PATCH /v1/workspaces/:ws {"notificationEmail": "...", "alertCopyEmail": "..."}` (`null` clears) | admin+ |
+| Set UTM presets / short links | Dashboard → Settings → Links, or `PATCH /v1/workspaces/:ws {"links": {"utm": {...}, "shorten": true}}` | admin+ |
+| Configure evergreen slots | Dashboard → Settings → Evergreen slots, or `PATCH … {"evergreen": {"slots": [{"weekday": 1, "time": "10:00"}], "minGapDays": 30}}` | admin+ |
+| Turn on approval enforcement and pick reviewers | Dashboard → Settings → Approval policy, or `PATCH … {"approval": {"required": true, "reviewers": ["<user id>"]}}` | admin+ |
+| Approve / revoke a post | Dashboard → Posts → Awaiting approval; `POST …/posts/:id/approve`, `DELETE …/posts/:id/approvals` | reviewer or owner / admin |
+| Retry a failed first comment | Maintenance retries `pending` comments up to 3 attempts; a `failed` one is final: post the comment by hand or edit `First Comment` and re-schedule | operator |
 | Delete a workspace | Dashboard → Settings → *Danger zone* (type DELETE), or `DELETE /v1/workspaces/:ws` → 202; purge runs 10 minutes later | owner |
 | Undo a deletion within the 10-minute window | `update workspace set deleted_at = null where id = '...'`; the purge job then reports `skipped`. Cancelled publications stay cancelled (reschedule in Notion) | operator |
 
@@ -111,6 +116,13 @@ Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by
 2. Set `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` (both or neither) and redeploy. The Connections page then shows *Connect with Notion*; the pasted-token form stays.
 3. Until Notion approves the integration only workspaces you own can install it; the token path covers everyone else meanwhile.
 4. A source that shows *Notion is connected but not set up yet* is a pending OAuth source (`content_source.status = disabled`, `config.setupPending = true`); the user finishes it at `/w/:ws/setup?source=...`. Disconnecting it discards the token.
+
+### Phase 4 companions (campaigns, series, evergreen, ideas)
+All of it runs inside the Notion sync; the sync summary (`content_source.synced` audit, `extras` in the manual sync response) shows `campaignsSeen`, `summariesWritten`, `instancesCreated`, `instancesUpdated`, `evergreenFilled`, `ideasSeen`, `promoted` and `warnings`. Useful queries:
+- Series of a page: `select id, series_key, series_fp = ? as unedited from post where parent_post_id = '<source post id>' order by series_key`.
+- Why an instance was skipped by propagation: the sync `warnings` say "edited by hand".
+- Campaign summaries: `select name, summary, summary_written_at from campaign where workspace_id = '…'`.
+- A companion database that stops validating (renamed column) is simply skipped; reconnect the source to refresh `campaignPropertyMap` / `ideasPropertyMap` in `content_source.config`.
 
 ### Configure Stripe billing
 1. Create the products and monthly prices in Stripe (Solo, Team, Agency, placeholder amounts $19 / $49 / $149) and put the price ids in `STRIPE_PRICE_SOLO`, `STRIPE_PRICE_TEAM`, `STRIPE_PRICE_AGENCY`. A missing id hides that plan.

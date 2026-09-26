@@ -102,10 +102,33 @@ export interface FakeNotionPageInput {
   archived?: boolean;
   /** Per-platform text overrides keyed by Notion property name (e.g. 'X Text'). */
   platformText?: Record<string, string>;
+  /** Phase 4: the database the page lives in; undefined = the content database. */
+  databaseId?: string;
+  campaignIds?: string[];
+  repeat?: string | null;
+  repeatUntil?: string | null;
+  repeatOf?: string[];
+  firstComment?: string;
+  /** Phase 4: free-form property values for companion pages (campaigns, ideas). */
+  extra?: Record<string, unknown>;
 }
 
 interface FakeNotionPage extends Required<
-  Omit<FakeNotionPageInput, 'publishDate' | 'status' | 'timeZone' | 'media' | 'platformText'>
+  Omit<
+    FakeNotionPageInput,
+    | 'publishDate'
+    | 'status'
+    | 'timeZone'
+    | 'media'
+    | 'platformText'
+    | 'databaseId'
+    | 'campaignIds'
+    | 'repeat'
+    | 'repeatUntil'
+    | 'repeatOf'
+    | 'firstComment'
+    | 'extra'
+  >
 > {
   id: string;
   status: string | null;
@@ -113,6 +136,15 @@ interface FakeNotionPage extends Required<
   timeZone: string | null;
   media: FakeMediaInput[];
   platformText: Record<string, string>;
+  databaseId: string | undefined;
+  campaignIds: string[];
+  repeat: string | null;
+  repeatUntil: string | null;
+  repeatOf: string[];
+  firstComment: string;
+  extra: Record<string, unknown>;
+  /** Block ids deleted through the API; indexes stay stable. */
+  deletedBlocks: Set<number>;
   lastEditedTime: string;
   system: {
     postelyoStatus: string | null;
@@ -121,7 +153,23 @@ interface FakeNotionPage extends Required<
     publishedAt: string | null;
     postelyoId: string;
     publishedUrls: string;
+    approval: string | null;
+    linkReport: string;
   };
+}
+
+/** Plain text of a write-side rich_text array (`text.content`) or a read-side one (`plain_text`). */
+function plainOf(v: unknown): string {
+  return Array.isArray(v)
+    ? v
+        .map(
+          (t) =>
+            (t as { text?: { content?: string }; plain_text?: string }).text?.content ??
+            (t as { plain_text?: string }).plain_text ??
+            '',
+        )
+        .join('')
+    : '';
 }
 
 const rt = (text: string) =>
@@ -144,6 +192,9 @@ export class FakeNotion {
   readonly createdDatabases = new Map<string, Record<string, unknown>>();
   /** Current signature for Notion-hosted file URLs; bumps on every page read. */
   fileSig = 1;
+  /** Phase 4: pages created through POST /v1/pages, in order. */
+  readonly createdPages: string[] = [];
+  private createdSeq = 0;
   private clock = Date.parse('2026-09-23T10:00:00.000Z');
   private seq = 0;
 
@@ -168,6 +219,15 @@ export class FakeNotion {
       platformText: input.platformText ?? prev?.platformText ?? {},
       timeZone: input.timeZone !== undefined ? input.timeZone : (prev?.timeZone ?? null),
       archived: input.archived ?? prev?.archived ?? false,
+      databaseId: input.databaseId ?? prev?.databaseId,
+      campaignIds: input.campaignIds ?? prev?.campaignIds ?? [],
+      repeat: input.repeat !== undefined ? input.repeat : (prev?.repeat ?? null),
+      repeatUntil:
+        input.repeatUntil !== undefined ? input.repeatUntil : (prev?.repeatUntil ?? null),
+      repeatOf: input.repeatOf ?? prev?.repeatOf ?? [],
+      firstComment: input.firstComment ?? prev?.firstComment ?? '',
+      extra: { ...(prev?.extra ?? {}), ...(input.extra ?? {}) },
+      deletedBlocks: input.body !== undefined ? new Set() : (prev?.deletedBlocks ?? new Set()),
       lastEditedTime: this.tick(),
       system: prev?.system ?? {
         postelyoStatus: null,
@@ -176,10 +236,38 @@ export class FakeNotion {
         publishedAt: null,
         postelyoId: '',
         publishedUrls: '',
+        approval: null,
+        linkReport: '',
       },
     };
     this.pages.set(id, page);
     return page;
+  }
+
+  /** Live body texts of a page as the API would list them (deleted blocks excluded). */
+  bodyOf(id: string): string[] {
+    const p = this.pages.get(id);
+    if (!p) return [];
+    return p.body.filter((_, i) => !p.deletedBlocks.has(i));
+  }
+
+  /** Pages the API would return for a database query (Phase 4 companion databases are isolated). */
+  private pagesIn(databaseId: string): FakeNotionPage[] {
+    const kind = this.databaseKind(databaseId);
+    return [...this.pages.values()].filter((p) =>
+      kind === 'content'
+        ? !p.databaseId || p.databaseId === databaseId
+        : p.databaseId === databaseId,
+    );
+  }
+
+  private databaseKind(databaseId: string): 'content' | 'campaigns' | 'ideas' {
+    const db = this.createdDatabases.get(databaseId) as
+      { title?: { plain_text?: string }[] } | undefined;
+    const title = (db?.title?.[0]?.plain_text ?? '').toLowerCase();
+    if (title.includes('campaign')) return 'campaigns';
+    if (title.includes('idea')) return 'ideas';
+    return 'content';
   }
 
   delete(id: string): void {
@@ -192,6 +280,38 @@ export class FakeNotion {
   }
 
   private toApiPage(p: FakeNotionPage): Record<string, unknown> {
+    const kind = p.databaseId ? this.databaseKind(p.databaseId) : 'content';
+    if (kind !== 'content') {
+      const x = p.extra;
+      return {
+        object: 'page',
+        id: p.id,
+        url: `https://www.notion.so/${p.id.replace(/-/g, '')}`,
+        archived: p.archived,
+        in_trash: false,
+        last_edited_time: p.lastEditedTime,
+        properties: {
+          Name: { type: 'title', title: rt(p.title) },
+          Status: { type: 'select', select: p.status ? { name: p.status } : null },
+          Notes: { type: 'rich_text', rich_text: rt(p.postText) },
+          Platforms: { type: 'multi_select', multi_select: p.platforms.map((name) => ({ name })) },
+          Start: { type: 'date', date: p.publishDate ? { start: p.publishDate.start } : null },
+          End: { type: 'date', date: typeof x['end'] === 'string' ? { start: x['end'] } : null },
+          Scheduled: { type: 'number', number: x['scheduled'] ?? null },
+          Published: { type: 'number', number: x['published'] ?? null },
+          Failed: { type: 'number', number: x['failed'] ?? null },
+          'Next Publish': {
+            type: 'date',
+            date: typeof x['nextPublish'] === 'string' ? { start: x['nextPublish'] } : null,
+          },
+          'Postelyo Summary': {
+            type: 'rich_text',
+            rich_text: rt(typeof x['summary'] === 'string' ? x['summary'] : ''),
+          },
+          'Post URL': { type: 'url', url: (x['postUrl'] as string | undefined) ?? null },
+        },
+      };
+    }
     return {
       object: 'page',
       id: p.id,
@@ -200,6 +320,16 @@ export class FakeNotion {
       in_trash: false,
       last_edited_time: p.lastEditedTime,
       properties: {
+        Campaign: { type: 'relation', relation: p.campaignIds.map((id) => ({ id })) },
+        Repeat: { type: 'select', select: p.repeat ? { name: p.repeat } : null },
+        'Repeat Until': { type: 'date', date: p.repeatUntil ? { start: p.repeatUntil } : null },
+        'Repeat Of': { type: 'relation', relation: p.repeatOf.map((id) => ({ id })) },
+        'First Comment': { type: 'rich_text', rich_text: rt(p.firstComment) },
+        Approval: {
+          type: 'select',
+          select: p.system.approval ? { name: p.system.approval } : null,
+        },
+        'Link Report': { type: 'rich_text', rich_text: rt(p.system.linkReport) },
         Name: { type: 'title', title: rt(p.title) },
         Status: { type: 'status', status: p.status ? { name: p.status } : null },
         'Publish Date': {
@@ -258,7 +388,7 @@ export class FakeNotion {
         page_size?: number;
       };
       const since = parsed.filter?.last_edited_time?.on_or_after;
-      const all = [...this.pages.values()]
+      const all = this.pagesIn(query[1]!)
         .filter((p) => !p.archived)
         .filter((p) => !since || p.lastEditedTime >= since)
         .sort((a, b) => a.lastEditedTime.localeCompare(b.lastEditedTime));
@@ -338,6 +468,61 @@ export class FakeNotion {
       return json(200, created);
     }
 
+    const dbPatch = path.match(/^\/databases\/([0-9a-f-]+)$/);
+    if (dbPatch && method === 'PATCH') {
+      const db = this.createdDatabases.get(dbPatch[1]!) as
+        { properties: Record<string, unknown> } | undefined;
+      if (!db) return json(404, { object: 'error', code: 'object_not_found', message: 'no db' });
+      const parsed = JSON.parse(body || '{}') as {
+        properties?: Record<string, Record<string, unknown>>;
+      };
+      for (const [name, def] of Object.entries(parsed.properties ?? {})) {
+        const type = Object.keys(def)[0] ?? 'unknown';
+        db.properties[name] = { id: name, name, type, [type]: def[type] };
+      }
+      return json(200, db);
+    }
+
+    if (path === '/pages' && method === 'POST') {
+      const parsed = JSON.parse(body || '{}') as {
+        parent?: { database_id?: string };
+        properties?: Record<string, Record<string, unknown>>;
+        children?: Record<string, unknown>[];
+      };
+      const dbId = parsed.parent?.database_id;
+      if (!dbId) return json(400, { object: 'error', code: 'validation_error', message: 'parent' });
+      const id = `created-page-${++this.createdSeq}`;
+      const input: FakeNotionPageInput = { databaseId: dbId, body: [] };
+      this.applyProperties(input, parsed.properties ?? {});
+      input.body = (parsed.children ?? []).map((c) =>
+        plainOf((c[String(c['type'])] as Record<string, unknown>)?.['rich_text']),
+      );
+      const page = this.upsert(id, input);
+      this.createdPages.push(id);
+      return json(200, this.toApiPage(page));
+    }
+
+    const blockDelete = path.match(/^\/blocks\/([0-9a-zA-Z-]+)-b(\d+)$/);
+    if (blockDelete && method === 'DELETE') {
+      const p = this.pages.get(blockDelete[1]!);
+      if (!p) return json(404, { object: 'error', code: 'object_not_found', message: 'block' });
+      p.deletedBlocks.add(Number(blockDelete[2]));
+      p.lastEditedTime = this.tick();
+      return json(200, { object: 'block', id: `${p.id}-b${blockDelete[2]}`, archived: true });
+    }
+
+    const childrenPatch = path.match(/^\/blocks\/([0-9a-zA-Z-]+)\/children$/);
+    if (childrenPatch && method === 'PATCH') {
+      const p = this.pages.get(childrenPatch[1]!);
+      if (!p) return json(404, { object: 'error', code: 'object_not_found', message: 'block' });
+      const parsed = JSON.parse(body || '{}') as { children?: Record<string, unknown>[] };
+      for (const c of parsed.children ?? []) {
+        p.body.push(plainOf((c[String(c['type'])] as Record<string, unknown>)?.['rich_text']));
+      }
+      p.lastEditedTime = this.tick();
+      return json(200, { object: 'list', results: [] });
+    }
+
     const pageMatch = path.match(/^\/pages\/([0-9a-zA-Z-]+)$/);
     if (pageMatch) {
       const p = this.pages.get(pageMatch[1]!);
@@ -357,12 +542,24 @@ export class FakeNotion {
         };
         const props = parsed.properties ?? {};
         this.patches.push({ pageId: p.id, properties: props });
+        const generic: FakeNotionPageInput = {};
+        this.applyProperties(generic, props);
+        Object.assign(
+          p,
+          Object.fromEntries(Object.entries(generic).filter(([, v]) => v !== undefined)),
+        );
         for (const [name, value] of Object.entries(props)) {
           const plain = (v: unknown) =>
             Array.isArray(v)
               ? v.map((t) => (t as { text?: { content?: string } }).text?.content ?? '').join('')
               : '';
           switch (name) {
+            case 'Approval':
+              p.system.approval = (value['select'] as { name?: string } | null)?.name ?? null;
+              break;
+            case 'Link Report':
+              p.system.linkReport = plain(value['rich_text']);
+              break;
             case 'Postelyo Status':
               p.system.postelyoStatus = (value['select'] as { name?: string } | null)?.name ?? null;
               break;
@@ -399,19 +596,114 @@ export class FakeNotion {
         });
       return json(200, {
         object: 'list',
-        results: p.body.map((text, i) => ({
-          object: 'block',
-          id: `${p.id}-b${i}`,
-          type: 'paragraph',
-          has_children: false,
-          paragraph: { rich_text: rt(text) },
-        })),
+        results: p.body
+          .map((text, i) => ({
+            object: 'block',
+            id: `${p.id}-b${i}`,
+            type: 'paragraph',
+            has_children: false,
+            paragraph: { rich_text: rt(text) },
+          }))
+          .filter((_, i) => !p.deletedBlocks.has(i)),
         has_more: false,
         next_cursor: null,
       });
     }
 
     return null;
+  }
+
+  /** Maps Notion property values (create/patch bodies) onto the fake page model. */
+  private applyProperties(
+    input: FakeNotionPageInput,
+    props: Record<string, Record<string, unknown>>,
+  ): void {
+    const name = (v: unknown) => (v as { name?: string } | null)?.name ?? null;
+    const ids = (v: unknown) =>
+      Array.isArray(v)
+        ? v.map((r) => (r as { id?: string }).id).filter((x): x is string => !!x)
+        : [];
+    for (const [key, value] of Object.entries(props)) {
+      switch (key) {
+        case 'Name':
+          input.title = plainOf(value['title']);
+          break;
+        case 'Status':
+          input.status = name(value['select'] ?? value['status']);
+          break;
+        case 'Publish Date':
+        case 'Start': {
+          const d = value['date'] as { start?: string; time_zone?: string | null } | null;
+          input.publishDate = d?.start ? { start: d.start, timeZone: d.time_zone ?? null } : null;
+          break;
+        }
+        case 'Platforms':
+          input.platforms =
+            (value['multi_select'] as { name: string }[] | undefined)?.map((o) => o.name) ?? [];
+          break;
+        case 'Post Text':
+        case 'Notes':
+          input.postText = plainOf(value['rich_text']);
+          break;
+        case 'Media':
+          input.media = (
+            (value['files'] as { name?: string; external?: { url: string } }[] | undefined) ?? []
+          )
+            .filter((f) => f.external?.url)
+            .map((f) => ({
+              name: f.name ?? 'file',
+              url: f.external!.url,
+              kind: 'external' as const,
+            }));
+          break;
+        case 'Time Zone':
+          input.timeZone = name(value['select']) ?? plainOf(value['rich_text']) ?? null;
+          break;
+        case 'First Comment':
+          input.firstComment = plainOf(value['rich_text']);
+          break;
+        case 'Repeat':
+          input.repeat = name(value['select']);
+          break;
+        case 'Repeat Until':
+          input.repeatUntil = (value['date'] as { start?: string } | null)?.start ?? null;
+          break;
+        case 'Repeat Of':
+          input.repeatOf = ids(value['relation']);
+          break;
+        case 'Campaign':
+          input.campaignIds = ids(value['relation']);
+          break;
+        case 'LinkedIn Text':
+        case 'X Text':
+        case 'Facebook Text':
+        case 'Instagram Caption':
+          input.platformText = {
+            ...(input.platformText ?? {}),
+            [key]: plainOf(value['rich_text']),
+          };
+          break;
+        case 'Post URL':
+          input.extra = { ...(input.extra ?? {}), postUrl: value['url'] ?? null };
+          break;
+        case 'Scheduled':
+        case 'Published':
+        case 'Failed':
+          input.extra = { ...(input.extra ?? {}), [key.toLowerCase()]: value['number'] ?? null };
+          break;
+        case 'Next Publish':
+          input.extra = {
+            ...(input.extra ?? {}),
+            nextPublish: (value['date'] as { start?: string } | null)?.start ?? null,
+          };
+          break;
+        case 'Postelyo Summary':
+          input.extra = { ...(input.extra ?? {}), summary: plainOf(value['rich_text']) };
+          break;
+        default:
+          break;
+      }
+    }
   }
 
   /** Serves Notion-hosted file bytes; stale signatures get 403 like an expired S3 link. */

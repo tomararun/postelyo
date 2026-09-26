@@ -191,7 +191,9 @@ Do not build a native content editor.
 
 ---
 
-## Phase 4 – Content operations in Notion
+## Phase 4 – Content operations in Notion (built 2026-09-26)
+
+**Status.** Built and tested against fakes: template v2 with Campaigns and Ideas databases, campaign summaries, recurring and evergreen series, first comments, UTM presets and short links, opt-in approval enforcement, idea promotion. Views ship through the duplicated Notion template (the API cannot create them). Deferred: best-time suggestions (Phase 5), CSV import (Notion-native), Bitly. Details in [roadmap.md](./roadmap.md) Phase 4 and [notion-template.md](./notion-template.md).
 
 **Goal.** The Notion database becomes a full content calendar and operations hub without leaving Notion.
 

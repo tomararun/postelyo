@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  type AnyPgColumn,
   boolean,
   customType,
   index,
@@ -388,11 +389,35 @@ export const post = pgTable(
     warnings: jsonb('warnings').notNull().default([]),
     cycleNo: integer('cycle_no').notNull().default(0),
     deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    /** Phase 4: campaign the page is related to (mirrors the Notion `Campaign` relation). */
+    campaignId: uuid('campaign_id').references((): AnyPgColumn => campaign.id, {
+      onDelete: 'set null',
+    }),
+    /** Phase 4: the source page of a recurring/evergreen instance (`Repeat Of`). */
+    parentPostId: uuid('parent_post_id').references((): AnyPgColumn => post.id, {
+      onDelete: 'set null',
+    }),
+    /** Phase 4: `<source page id>:<occurrence>` for generated instances; unique per source. */
+    seriesKey: text('series_key'),
+    /** Phase 4: text fingerprint the instance was generated with; edited instances stop matching. */
+    seriesFp: text('series_fp'),
+    /** Phase 4 (source pages): content hash last propagated to future instances. */
+    seriesSourceHash: text('series_source_hash'),
+    /** Phase 4: `Repeat` rule as observed (`weekly`, `biweekly`, `monthly`, `evergreen`). */
+    repeatRule: text('repeat_rule'),
+    /** Phase 4: `Repeat Until` (YYYY-MM-DD). */
+    repeatUntil: text('repeat_until'),
+    /** Phase 4: fingerprint of what a reviewer would approve, refreshed on every sync of a Ready page. */
+    approvalFp: text('approval_fp'),
     ...timestamps,
   },
   (t) => [
     uniqueIndex('post_source_external_uq').on(t.contentSourceId, t.externalId),
+    uniqueIndex('post_series_key_uq')
+      .on(t.contentSourceId, t.seriesKey)
+      .where(sql`${t.seriesKey} is not null`),
     index('post_workspace_state_idx').on(t.workspaceId, t.state),
+    index('post_parent_idx').on(t.parentPostId),
   ],
 );
 
@@ -454,6 +479,11 @@ export const publication = pgTable(
     lastErrorMessage: text('last_error_message'),
     writebackState: writebackState('writeback_state').notNull().default('pending'),
     writebackAttempts: integer('writeback_attempts').notNull().default(0),
+    /** Phase 4 first comment: null = none requested; `pending` → `posting` → `posted` | `failed`. */
+    firstCommentState: text('first_comment_state'),
+    firstCommentId: text('first_comment_id'),
+    firstCommentError: text('first_comment_error'),
+    firstCommentAttempts: integer('first_comment_attempts').notNull().default(0),
     ...timestamps,
   },
   (t) => [
@@ -467,6 +497,93 @@ export const publication = pgTable(
 );
 
 export type Publication = typeof publication.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Phase 4: campaigns, approvals, short links (domain-model §2.14–2.16)
+// ---------------------------------------------------------------------------
+
+/** A page of the Notion Campaigns database; posts relate to it through `post.campaign_id`. */
+export const campaign = pgTable(
+  'campaign',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    contentSourceId: uuid('content_source_id').references(() => contentSource.id, {
+      onDelete: 'set null',
+    }),
+    /** Notion page id in the Campaigns database. */
+    externalId: text('external_id').notNull(),
+    externalUrl: text('external_url'),
+    name: text('name').notNull(),
+    sourceStatus: text('source_status'),
+    startsOn: text('starts_on'),
+    endsOn: text('ends_on'),
+    /** Last summary written back (counts, next publish, links); hashed for change detection. */
+    summary: jsonb('summary'),
+    summaryHash: text('summary_hash'),
+    summaryWrittenAt: timestamp('summary_written_at', { withTimezone: true }),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    uniqueIndex('campaign_source_external_uq').on(t.contentSourceId, t.externalId),
+    index('campaign_workspace_idx').on(t.workspaceId),
+  ],
+);
+
+export type Campaign = typeof campaign.$inferSelect;
+
+/** Reviewer sign-off bound to the content the reviewer saw (Phase 4 approval policy). */
+export const approval = pgTable(
+  'approval',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    postId: uuid('post_id')
+      .notNull()
+      .references(() => post.id, { onDelete: 'cascade' }),
+    /** Text fingerprint of title + platforms + body at approval time. */
+    contentFp: text('content_fp').notNull(),
+    approvedByUserId: uuid('approved_by_user_id').references(() => user.id, {
+      onDelete: 'set null',
+    }),
+    approvedAt: timestamp('approved_at', { withTimezone: true }).notNull().defaultNow(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  },
+  (t) => [index('approval_post_idx').on(t.postId, t.approvedAt)],
+);
+
+export type Approval = typeof approval.$inferSelect;
+
+/** A tracked link inside a publication's rendered text; served at `/l/{code}`. */
+export const shortLink = pgTable(
+  'short_link',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    publicationId: uuid('publication_id').references(() => publication.id, {
+      onDelete: 'set null',
+    }),
+    code: text('code').notNull().unique(),
+    /** The final destination, UTM parameters already applied. */
+    targetUrl: text('target_url').notNull(),
+    clicks: integer('clicks').notNull().default(0),
+    lastClickAt: timestamp('last_click_at', { withTimezone: true }),
+    ...timestamps,
+  },
+  (t) => [
+    index('short_link_publication_idx').on(t.publicationId),
+    uniqueIndex('short_link_publication_target_uq').on(t.publicationId, t.targetUrl),
+  ],
+);
+
+export type ShortLink = typeof shortLink.$inferSelect;
 
 export const attemptOutcome = pgEnum('attempt_outcome', [
   'succeeded',

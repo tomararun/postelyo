@@ -1,4 +1,9 @@
-import type { PublishResult } from '../../provider.js';
+import type {
+  CommentInput,
+  CommentResult,
+  ProviderContext,
+  PublishResult,
+} from '../../provider.js';
 import { asRecord, num, parseJson, str } from '../shared/graph-errors.js';
 
 /**
@@ -93,6 +98,64 @@ export function classifyGraph(
         reason: `Unexpected ${provider} response ${res.status}: ${message}`,
         raw,
       };
+}
+
+/** Phase 4 first comment for Facebook Pages and Instagram: `POST /{object-id}/comments`. */
+export async function graphComment(
+  fetchImpl: typeof fetch,
+  graphUrl: string,
+  input: CommentInput,
+  ctx: ProviderContext,
+  provider: string,
+): Promise<CommentResult> {
+  let res: Response;
+  try {
+    res = await fetchImpl(`${graphUrl}/${encodeURIComponent(input.providerPostId)}/comments`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${ctx.credentials.accessToken}`,
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: form({ message: input.text }).toString(),
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    });
+  } catch (err) {
+    return {
+      kind: 'failed',
+      reason: `${provider} unreachable: ${(err as Error).message}`,
+      retryable: true,
+    };
+  }
+  const text = await res.text().catch(() => '');
+  const raw = { status: res.status, body: text.slice(0, 2000) };
+  if (res.ok) {
+    const id = str(parseJson(text), 'id');
+    return id
+      ? { kind: 'posted', commentId: id, raw }
+      : {
+          kind: 'failed',
+          reason: `${provider} returned success without a comment id`,
+          retryable: false,
+          raw,
+        };
+  }
+  const err = graphError(text);
+  const code = err?.code ?? 0;
+  const retryable =
+    res.status === 429 ||
+    res.status >= 500 ||
+    code === 1 ||
+    code === 2 ||
+    code === 4 ||
+    code === 17 ||
+    code === 32 ||
+    code === 613;
+  return {
+    kind: 'failed',
+    reason: `${provider} rejected the comment: ${err?.message ?? res.statusText}`,
+    retryable,
+    raw,
+  };
 }
 
 export function form(fields: Record<string, string | undefined>): URLSearchParams {

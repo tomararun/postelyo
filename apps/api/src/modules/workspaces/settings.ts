@@ -29,6 +29,95 @@ export interface WorkspaceSettings {
   notificationEmail?: string;
   /** Phase 3: gets a copy of operational alerts that concern this workspace. */
   alertCopyEmail?: string;
+  /** Phase 4: link handling applied at render time (never to the Notion source). */
+  links?: LinkSettings;
+  /** Phase 4: evergreen re-share slots. */
+  evergreen?: EvergreenSettings;
+  /** Phase 4: opt-in approval enforcement. */
+  approval?: ApprovalSettings;
+}
+
+export interface UtmSettings {
+  source?: string | undefined;
+  medium?: string | undefined;
+  /** May contain `{campaign}` (campaign name slug) and `{platform}`. */
+  campaign?: string | undefined;
+}
+
+export interface LinkSettings {
+  utm?: UtmSettings | undefined;
+  /** Replace links with `${APP_BASE_URL}/l/<code>` and count clicks. */
+  shorten?: boolean | undefined;
+}
+
+export interface EvergreenSlot {
+  /** 1 = Monday … 7 = Sunday (ISO). */
+  weekday: number;
+  /** HH:MM in the workspace time zone. */
+  time: string;
+}
+
+export interface EvergreenSettings {
+  slots: EvergreenSlot[];
+  /** Days before the same page may be re-shared to the same account (default 30). */
+  minGapDays?: number | undefined;
+}
+
+export interface ApprovalSettings {
+  required: boolean;
+  /** User ids allowed to approve; owners always may. */
+  reviewers: string[];
+}
+
+export const DEFAULT_EVERGREEN_MIN_GAP_DAYS = 30;
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function readLinks(raw: unknown): LinkSettings | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: LinkSettings = {};
+  if (typeof r['utm'] === 'object' && r['utm'] !== null) {
+    const u = r['utm'] as Record<string, unknown>;
+    const utm: UtmSettings = {};
+    for (const k of ['source', 'medium', 'campaign'] as const) {
+      if (typeof u[k] === 'string' && u[k].trim().length > 0) utm[k] = u[k].trim();
+    }
+    if (Object.keys(utm).length > 0) out.utm = utm;
+  }
+  if (typeof r['shorten'] === 'boolean') out.shorten = r['shorten'];
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function readEvergreen(raw: unknown): EvergreenSettings | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const r = raw as Record<string, unknown>;
+  const slots: EvergreenSlot[] = Array.isArray(r['slots'])
+    ? r['slots']
+        .map((s) => s as Record<string, unknown>)
+        .filter(
+          (s) =>
+            typeof s['weekday'] === 'number' &&
+            s['weekday'] >= 1 &&
+            s['weekday'] <= 7 &&
+            typeof s['time'] === 'string' &&
+            TIME_RE.test(s['time']),
+        )
+        .map((s) => ({ weekday: s['weekday'] as number, time: s['time'] as string }))
+    : [];
+  const out: EvergreenSettings = { slots };
+  if (typeof r['minGapDays'] === 'number' && r['minGapDays'] >= 1) out.minGapDays = r['minGapDays'];
+  return out;
+}
+
+function readApproval(raw: unknown): ApprovalSettings | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const r = raw as Record<string, unknown>;
+  return {
+    required: r['required'] === true,
+    reviewers: Array.isArray(r['reviewers'])
+      ? r['reviewers'].filter((x): x is string => typeof x === 'string')
+      : [],
+  };
 }
 
 export function readSettings(ws: Pick<Workspace, 'settings'>): WorkspaceSettings {
@@ -52,7 +141,23 @@ export function readSettings(ws: Pick<Workspace, 'settings'>): WorkspaceSettings
   if (typeof raw.alertCopyEmail === 'string' && raw.alertCopyEmail.includes('@')) {
     out.alertCopyEmail = raw.alertCopyEmail;
   }
+  const links = readLinks(raw.links);
+  if (links) out.links = links;
+  const evergreen = readEvergreen(raw.evergreen);
+  if (evergreen) out.evergreen = evergreen;
+  const approval = readApproval(raw.approval);
+  if (approval) out.approval = approval;
   return out;
+}
+
+export function approvalRequired(ws: Pick<Workspace, 'settings'>): boolean {
+  return readSettings(ws).approval?.required === true;
+}
+
+/** Owners always may approve; otherwise the user must be listed as a reviewer. */
+export function canApprove(ws: Pick<Workspace, 'settings'>, userId: string, role: string): boolean {
+  if (role === 'owner') return true;
+  return (readSettings(ws).approval?.reviewers ?? []).includes(userId);
 }
 
 export function dailyCapFor(ws: Pick<Workspace, 'settings'>): number {

@@ -78,6 +78,32 @@ export async function updateWorkspace(workspaceId: string, formData: FormData): 
         }
       : {}),
   };
+  // Phase 4 forms: each replaces its structured setting wholesale.
+  if (formData.has('linksForm')) {
+    const utm = {
+      ...(text('utmSource') ? { source: text('utmSource') } : {}),
+      ...(text('utmMedium') ? { medium: text('utmMedium') } : {}),
+      ...(text('utmCampaign') ? { campaign: text('utmCampaign') } : {}),
+    };
+    const shorten = formData.get('shorten') === 'on';
+    body['links'] = Object.keys(utm).length === 0 && !shorten ? null : { utm, shorten };
+  }
+  if (formData.has('evergreenForm')) {
+    const slots: { weekday: number; time: string }[] = [];
+    for (let i = 0; i < 7; i++) {
+      const weekday = Number(text(`slot_${i}_weekday`) ?? '');
+      const time = text(`slot_${i}_time`) ?? '';
+      if (weekday >= 1 && weekday <= 7 && /^\d{2}:\d{2}$/.test(time)) slots.push({ weekday, time });
+    }
+    const gap = Number(text('minGapDays') ?? '');
+    body['evergreen'] =
+      slots.length === 0 ? null : { slots, ...(gap >= 1 ? { minGapDays: gap } : {}) };
+  }
+  if (formData.has('approvalForm')) {
+    const required = formData.get('approvalRequired') === 'on';
+    const reviewers = formData.getAll('reviewer').filter((v): v is string => typeof v === 'string');
+    body['approval'] = required || reviewers.length > 0 ? { required, reviewers } : null;
+  }
   const path = `/w/${workspaceId}/settings`;
   try {
     await api(`/v1/workspaces/${workspaceId}`, { method: 'PATCH', body });
@@ -85,6 +111,29 @@ export async function updateWorkspace(workspaceId: string, formData: FormData): 
     redirect(back(path, { error: errorMessage(err) }));
   }
   redirect(back(path, { notice: 'Settings saved.' }));
+}
+
+export async function approvePost(workspaceId: string, postId: string): Promise<void> {
+  const path = `/w/${workspaceId}/posts`;
+  try {
+    await api(`/v1/workspaces/${workspaceId}/posts/${postId}/approve`, {
+      method: 'POST',
+      body: {},
+    });
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(back(path, { notice: 'Approved. Notion updates within a minute.' }));
+}
+
+export async function revokeApproval(workspaceId: string, postId: string): Promise<void> {
+  const path = `/w/${workspaceId}/posts`;
+  try {
+    await api(`/v1/workspaces/${workspaceId}/posts/${postId}/approvals`, { method: 'DELETE' });
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(back(path, { notice: 'Approval revoked.' }));
 }
 
 export async function deleteWorkspace(workspaceId: string, formData: FormData): Promise<void> {
@@ -160,7 +209,13 @@ export async function completeSetup(
           parentPageId: field(formData, 'parentPageId', ''),
           title: field(formData, 'title') || 'Postelyo Content',
         }
-      : { mode: 'existing', databaseId: field(formData, 'databaseId', '') };
+      : {
+          mode: 'existing',
+          databaseId: field(formData, 'databaseId', ''),
+          ...(field(formData, 'ideasDatabaseId')
+            ? { ideasDatabaseId: field(formData, 'ideasDatabaseId') }
+            : {}),
+        };
   const path = `/w/${workspaceId}/setup?source=${sourceId}`;
   try {
     await api(`/v1/workspaces/${workspaceId}/content-sources/${sourceId}/setup`, {

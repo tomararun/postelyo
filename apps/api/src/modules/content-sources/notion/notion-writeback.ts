@@ -8,6 +8,8 @@ import { propName, type PropertyMap, type SourcePost } from './notion-mapper.js'
 
 export const POSTELYO_STATUS = {
   awaitingSchedule: 'Awaiting schedule',
+  awaitingApproval: 'Awaiting approval',
+  evergreenPool: 'In evergreen pool',
   validationError: 'Validation error',
   scheduled: 'Scheduled',
   publishing: 'Publishing',
@@ -24,6 +26,8 @@ export type PostelyoStatus = (typeof POSTELYO_STATUS)[keyof typeof POSTELYO_STAT
 /** Statuses the sync may clear when a page leaves the scheduling flow. */
 export const PRE_PUBLISH_STATUSES: readonly string[] = [
   POSTELYO_STATUS.awaitingSchedule,
+  POSTELYO_STATUS.awaitingApproval,
+  POSTELYO_STATUS.evergreenPool,
   POSTELYO_STATUS.validationError,
   POSTELYO_STATUS.scheduled,
   POSTELYO_STATUS.needsReauth,
@@ -37,7 +41,18 @@ export interface DesiredWriteback {
   publishedAt?: string | null;
   /** One `<label>: <url>` per platform (Phase 2); written only when the database has the property. */
   publishedUrls?: { label: string; url: string }[];
+  /** Phase 4 approval column (`Awaiting approval`, `Approved`, `Changes since approval`); null clears. */
+  approval?: string | null;
+  /** Phase 4 tracked links, one `<short> → <target>` per line; written only when the column exists. */
+  linkReport?: string;
 }
+
+/** Phase 4 approval column values. */
+export const APPROVAL_STATUS = {
+  awaiting: 'Awaiting approval',
+  approved: 'Approved',
+  changed: 'Changes since approval',
+} as const;
 
 /** Notion rich_text objects are capped at 2 000 characters; keep a margin for safety. */
 const MAX_NOTE = 1_900;
@@ -94,6 +109,16 @@ export function writebackPatch(
           { type: 'text', text: { content: u.url, link: { url: u.url } } },
         ]),
       };
+    }
+  }
+  if (desired.approval !== undefined && map['Approval']) {
+    if ((current.approval ?? null) !== desired.approval) {
+      props[map['Approval']] = { select: desired.approval ? { name: desired.approval } : null };
+    }
+  }
+  if (desired.linkReport !== undefined && map['Link Report']) {
+    if ((current.linkReport ?? '') !== desired.linkReport) {
+      props[map['Link Report']] = { rich_text: richText(desired.linkReport) };
     }
   }
   return Object.keys(props).length === 0 ? null : props;

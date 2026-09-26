@@ -17,6 +17,7 @@ const config: NextConfig = {
       { source: '/oauth/:path*', destination: `${api}/oauth/:path*` },
       { source: '/webhooks/:path*', destination: `${api}/webhooks/:path*` },
       { source: '/media/:path*', destination: `${api}/media/:path*` },
+      { source: '/l/:path*', destination: `${api}/l/:path*` },
       { source: '/metrics', destination: `${api}/metrics` },
       { source: '/health/:path*', destination: `${api}/health/:path*` },
     ];

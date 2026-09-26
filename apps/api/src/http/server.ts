@@ -20,6 +20,7 @@ import { authPlugin, decorateAuth } from './plugins/auth.js';
 import { billingRoutes } from './routes/billing.js';
 import { connectionRoutes } from './routes/connections.js';
 import { legalRoutes } from './routes/legal.js';
+import { linkRoutes } from './routes/links.js';
 import { teamRoutes } from './routes/team.js';
 import { mediaRoutes } from './routes/media.js';
 import { meRoutes } from './routes/me.js';
@@ -145,6 +146,7 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     billing: deps.services.billing,
   });
   await app.register(legalRoutes);
+  await app.register(linkRoutes, { links: deps.services.links });
   await app.register(mediaRoutes, { storage: deps.services.storage });
   await app.register(pageRoutes, {
     workspaces,
@@ -179,7 +181,12 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     meta,
     notion,
   });
-  await app.register(postRoutes, { postQuery, workspaces });
+  await app.register(postRoutes, {
+    postQuery,
+    workspaces,
+    approvals: deps.services.approvals,
+    campaigns: deps.services.campaigns,
+  });
   await app.register(publicationRoutes, { workspaces, publications });
   return app;
 }

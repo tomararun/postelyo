@@ -70,12 +70,22 @@ If it shows **Validation error**, read the note, fix the page, and it re-checks 
 
 Owners and admins set the time zone, default publish time, daily cap, which platforms are enabled, and two email addresses: where account notices (like LinkedIn expiring) go, and an optional copy of operational alerts. Owners can delete the workspace from the **Danger zone**: scheduled posts are cancelled at once and everything is purged shortly after.
 
+## Campaigns, series and more (template v2)
+
+- **Campaigns**: create a page in *Postelyo Campaigns* and pick it in a post's `Campaign` relation. The campaign page shows scheduled, published and failed counts, the next publish time and the first and latest links, refreshed automatically.
+- **Recurring posts**: set `Repeat` (Weekly, Every 2 weeks, Monthly) and optionally `Repeat Until` on a Scheduled page. Postelyo creates one page per future occurrence (60 days ahead), each linked through `Repeat Of`. Edit the source page to update the copies you have not touched; edit a copy to make it your own.
+- **Evergreen**: set `Repeat = Evergreen` and `Status = Ready` on posts worth re-sharing. Your admin defines weekly slots in Settings; Postelyo fills them, never re-sharing the same page within the minimum gap.
+- **First comment**: fill `First Comment` to post it right after the post goes live (LinkedIn, X, Facebook, Instagram). If it fails, the note says so; the post itself is unaffected.
+- **Links**: with UTM presets and short links switched on in Settings, links in your post are tagged and shortened when published (never in Notion). Clicks show on the post's page in Postelyo and in `Link Report`.
+- **Approvals**: when your admin turns the policy on, a Ready post shows `Awaiting approval` until a reviewer approves it in Postelyo → Posts. Any edit afterwards needs a new approval. Scheduling without one shows a validation error.
+- **Ideas**: jot ideas in *Postelyo Ideas*; set `Status = Promote` and a Draft appears in the content database with a link back.
+
 ## Daily use
 
 | Do this in Notion | What happens |
 |-------------------|--------------|
 | Write in `Draft`, move to `In review`, `Changes requested`, `Ready` | Nothing is published. Postelyo only mirrors these for reporting. |
-| `Ready` + a date | `Postelyo Status = Awaiting schedule`. Still nothing is published. |
+| `Ready` + a date | `Postelyo Status = Awaiting schedule` (or `Awaiting approval` when approvals are enforced). Still nothing is published. |
 | `Scheduled` + a date + `LinkedIn` | Scheduled. Change the date to reschedule. |
 | Edit text while scheduled | Picked up automatically until 5 minutes before publish time. |
 | Move away from `Scheduled` or clear the date | Cancelled. Nothing is published. |

@@ -47,6 +47,14 @@ export const NOTION_CONTRACT: readonly ContractProperty[] = [
   { name: 'X Text', types: ['rich_text'], required: false, owner: 'user', silent: true },
   { name: 'Facebook Text', types: ['rich_text'], required: false, owner: 'user', silent: true },
   { name: 'Instagram Caption', types: ['rich_text'], required: false, owner: 'user', silent: true },
+  // Phase 4 (template v2): every addition is optional and silent so v1 databases keep validating.
+  { name: 'Campaign', types: ['relation'], required: false, owner: 'user', silent: true },
+  { name: 'Repeat', types: ['select', 'status'], required: false, owner: 'user', silent: true },
+  { name: 'Repeat Until', types: ['date'], required: false, owner: 'user', silent: true },
+  { name: 'First Comment', types: ['rich_text'], required: false, owner: 'user', silent: true },
+  { name: 'Repeat Of', types: ['relation'], required: false, owner: 'system', silent: true },
+  { name: 'Approval', types: ['select'], required: false, owner: 'system', silent: true },
+  { name: 'Link Report', types: ['rich_text'], required: false, owner: 'system', silent: true },
   // System-owned select options are created on write, so only the property must exist.
   { name: 'Postelyo Status', types: ['select'], required: true, owner: 'system' },
   { name: 'Postelyo Note', types: ['rich_text'], required: true, owner: 'system' },
@@ -55,6 +63,40 @@ export const NOTION_CONTRACT: readonly ContractProperty[] = [
   { name: 'Postelyo ID', types: ['rich_text'], required: true, owner: 'system' },
   // Phase 2: one link per platform when a page publishes to several; written only when present.
   { name: 'Published URLs', types: ['rich_text'], required: false, owner: 'system', silent: true },
+];
+
+/** Phase 4 companion database: campaigns. Only `Name` is required; summary columns are written when present. */
+export const CAMPAIGN_CONTRACT: readonly ContractProperty[] = [
+  { name: 'Name', types: ['title'], required: true, owner: 'user' },
+  { name: 'Status', types: ['select', 'status'], required: false, owner: 'user', silent: true },
+  { name: 'Start', types: ['date'], required: false, owner: 'user', silent: true },
+  { name: 'End', types: ['date'], required: false, owner: 'user', silent: true },
+  { name: 'Scheduled', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Published', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Failed', types: ['number'], required: false, owner: 'system', silent: true },
+  { name: 'Next Publish', types: ['date'], required: false, owner: 'system', silent: true },
+  {
+    name: 'Postelyo Summary',
+    types: ['rich_text'],
+    required: false,
+    owner: 'system',
+    silent: true,
+  },
+];
+
+/** Phase 4 companion database: ideas. `Status = Promote` triggers promotion to a draft post. */
+export const IDEAS_CONTRACT: readonly ContractProperty[] = [
+  { name: 'Name', types: ['title'], required: true, owner: 'user' },
+  {
+    name: 'Status',
+    types: ['select', 'status'],
+    required: true,
+    owner: 'user',
+    requiredOptions: ['Promote', 'Promoted'],
+  },
+  { name: 'Notes', types: ['rich_text'], required: false, owner: 'user', silent: true },
+  { name: 'Platforms', types: ['multi_select'], required: false, owner: 'user', silent: true },
+  { name: 'Post URL', types: ['url'], required: false, owner: 'system', silent: true },
 ];
 
 export type SchemaIssueCode = 'MISSING_PROPERTY' | 'WRONG_TYPE' | 'MISSING_OPTION';
@@ -75,7 +117,10 @@ export interface SchemaValidation {
 
 const norm = (s: string) => s.trim().toLowerCase();
 
-export function validateNotionDatabase(db: NotionDatabase): SchemaValidation {
+export function validateNotionDatabase(
+  db: NotionDatabase,
+  contract: readonly ContractProperty[] = NOTION_CONTRACT,
+): SchemaValidation {
   const byNorm = new Map<string, { name: string; type: string; options: Set<string> }>();
   for (const p of Object.values(db.properties)) {
     byNorm.set(norm(p.name), {
@@ -89,7 +134,7 @@ export function validateNotionDatabase(db: NotionDatabase): SchemaValidation {
   const warnings: SchemaIssue[] = [];
   const propertyMap: Record<string, string> = {};
 
-  for (const c of NOTION_CONTRACT) {
+  for (const c of contract) {
     const found = byNorm.get(norm(c.name));
     if (!found) {
       if (c.silent) continue;

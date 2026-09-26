@@ -14,6 +14,13 @@ export interface WorkspaceDto {
   providers: { linkedin: boolean; x: boolean; facebook: boolean; instagram: boolean };
   notificationEmail: string | null;
   alertCopyEmail: string | null;
+  /** Phase 4 */
+  links: {
+    utm?: { source?: string; medium?: string; campaign?: string };
+    shorten?: boolean;
+  } | null;
+  evergreen: { slots: { weekday: number; time: string }[]; minGapDays?: number } | null;
+  approval: { required: boolean; reviewers: string[] } | null;
 }
 
 /** Signed-in user plus the workspace they are looking at; redirects to sign-in or 404s. */

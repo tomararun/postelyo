@@ -322,6 +322,47 @@ Effective plan = `plan` while `active`/`trialing`, or while `past_due` before `g
 | received_at / processed_at | timestamptz | |
 | outcome | text null | `customer_linked`, `subscription_active`, `grace_started`, `ignored:<reason>`, `error:<message>` |
 
+### 2.14 `campaign` (Phase 4)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS |
+| content_source_id | uuid FK null | |
+| external_id | text | Notion page id in the Campaigns database; UNIQUE with `content_source_id` |
+| external_url, name, source_status, starts_on, ends_on | | Mirrored from the page |
+| summary | jsonb | Last summary written (`scheduled`, `published`, `failed`, `nextPublishAt`, `firstUrl`, `lastUrl`, `posts`) |
+| summary_hash, summary_written_at | | Change detection |
+| archived_at | timestamptz null | Page archived in Notion |
+
+`post.campaign_id` (FK, set null) links posts.
+
+### 2.15 `approval` (Phase 4)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id, post_id | uuid FK | RLS; cascades with the post |
+| content_fp | text | Text-only fingerprint the reviewer approved (see `approvalFingerprint`) |
+| approved_by_user_id | uuid FK null | |
+| approved_at | timestamptz | |
+| revoked_at | timestamptz null | |
+
+### 2.16 `short_link` (Phase 4)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS |
+| publication_id | uuid FK null | UNIQUE with `target_url`: retries reuse the code |
+| code | text UNIQUE | 8 URL-safe characters |
+| target_url | text | Destination with UTM parameters applied |
+| clicks, last_click_at | | Counted by `/l/{code}` |
+
+### 2.17 Phase 4 columns on existing tables
+
+`post`: `parent_post_id` (source page of a generated instance), `series_key` (UNIQUE per source: `<page>:<date>` or `evergreen:<instant>`), `series_fp` (text fingerprint the instance was generated with), `series_source_hash` (content hash last propagated), `repeat_rule` (`weekly`, `biweekly`, `monthly`, `evergreen`), `repeat_until`, `approval_fp` (fingerprint a reviewer would approve now). `publication`: `first_comment_state` (null, `pending`, `posting`, `posted`, `failed`), `first_comment_id`, `first_comment_error`, `first_comment_attempts`. `workspace.settings` gains `links`, `evergreen`, `approval`.
+
 ### 2.13 Queue tables
 
 Owned by pg-boss in its own schema (`pgboss`). Not part of the domain; never queried by domain code.

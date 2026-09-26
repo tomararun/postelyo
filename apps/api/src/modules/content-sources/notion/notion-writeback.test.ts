@@ -8,6 +8,8 @@ const current = {
   publishedAt: null,
   postelyoId: '',
   publishedUrls: null,
+  approval: null,
+  linkReport: null,
 };
 
 describe('writebackPatch', () => {

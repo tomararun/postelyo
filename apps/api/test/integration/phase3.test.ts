@@ -262,7 +262,8 @@ describe('phase 3 self-serve', () => {
       expect(
         done.json<{ status: string; setupPending: boolean; databaseTitle: string }>(),
       ).toMatchObject({ status: 'active', setupPending: false, databaseTitle: 'Team Content' });
-      expect(fake.notion.createdDatabases.size).toBe(before + 1);
+      // Template v2 (Phase 4) creates the content, campaigns and ideas databases together.
+      expect(fake.notion.createdDatabases.size).toBe(before + 3);
       const audit = await stack.db.db
         .select()
         .from(auditLog)

@@ -1,4 +1,6 @@
 import type {
+  CommentInput,
+  CommentResult,
   LoadedMedia,
   PostSnapshot,
   ProviderCapabilities,
@@ -29,6 +31,8 @@ import { renderLittleText, unescapeLittleText } from './little-text.js';
 export const LINKEDIN_POSTS_URL = 'https://api.linkedin.com/rest/posts';
 /** Default wait when LinkedIn throttles without a Retry-After header. */
 export const LINKEDIN_RATE_LIMIT_WAIT_MS = 15 * 60_000;
+/** Comments on a post (Phase 4 first comment): `/rest/socialActions/{postUrn}/comments`. */
+export const LINKEDIN_SOCIAL_ACTIONS_URL = 'https://api.linkedin.com/rest/socialActions';
 export const LINKEDIN_IMAGES_INIT_URL =
   'https://api.linkedin.com/rest/images?action=initializeUpload';
 /** Monthly LinkedIn-Version pin; bump deliberately with a contract-test run. */
@@ -59,6 +63,7 @@ export class LinkedInProvider implements PublishingProvider {
       maxImages: 1,
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: LINKEDIN_MAX_IMAGE_BYTES,
+      firstComment: true,
     };
   }
 
@@ -358,6 +363,43 @@ export class LinkedInProvider implements PublishingProvider {
     }
     await input.onMediaUploaded?.(media.assetId, imageUrn, loaded.contentHash);
     return { ok: true, value: imageUrn };
+  }
+
+  /** First comment: posted by the same author under the freshly created post. */
+  async comment(input: CommentInput, ctx: ProviderContext): Promise<CommentResult> {
+    const url = `${LINKEDIN_SOCIAL_ACTIONS_URL}/${encodeURIComponent(input.providerPostId)}/comments`;
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, {
+        method: 'POST',
+        headers: this.headers(ctx, { 'content-type': 'application/json' }),
+        body: JSON.stringify({
+          actor: authorUrn(input.account),
+          message: { text: input.text },
+        }),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      });
+    } catch (err) {
+      return {
+        kind: 'failed',
+        reason: `LinkedIn unreachable: ${(err as Error).message}`,
+        retryable: true,
+      };
+    }
+    const text = await res.text().catch(() => '');
+    const raw = { status: res.status, body: text.slice(0, 2000) };
+    if (res.status === 201 || res.status === 200) {
+      const id =
+        res.headers.get('x-restli-id') ?? idFromBody(text) ?? `comment-on-${input.providerPostId}`;
+      return { kind: 'posted', commentId: id, raw };
+    }
+    const retryable = res.status === 429 || res.status >= 500;
+    return {
+      kind: 'failed',
+      reason: `LinkedIn rejected the comment (${statusLabel(res)}): ${messageFromBody(text) ?? 'no details'}`,
+      retryable,
+      raw,
+    };
   }
 
   private headers(ctx: ProviderContext, extra: Record<string, string>): Record<string, string> {

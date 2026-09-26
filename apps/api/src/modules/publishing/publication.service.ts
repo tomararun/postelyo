@@ -14,6 +14,7 @@ import { recomputePostState } from '../posts/post-state.js';
 import { assertPublicationTransition } from '../posts/state-machine.js';
 import type { TenantContext } from '../tenancy/tenant-context.js';
 import type { JobEnqueuer } from './jobs.js';
+import type { LinkService } from '../links/link.service.js';
 
 export class PublicationError extends Error {
   constructor(
@@ -46,6 +47,11 @@ export interface PublicationDto {
   lastErrorCode: string | null;
   lastErrorMessage: string | null;
   writebackState: Publication['writebackState'];
+  /** Phase 4 */
+  firstCommentState: string | null;
+  firstCommentId: string | null;
+  firstCommentError: string | null;
+  links: { shown: string; target: string; clicks: number }[];
   attempts: {
     attemptNo: number;
     cycleNo: number;
@@ -74,6 +80,7 @@ export class PublicationService {
     private readonly db: Db,
     private readonly enqueue: JobEnqueuer,
     private readonly clock: Clock,
+    private readonly links?: LinkService,
   ) {}
 
   async get(ctx: TenantContext, id: string): Promise<PublicationDto | null> {
@@ -89,7 +96,14 @@ export class PublicationService {
         .from(publishAttempt)
         .where(eq(publishAttempt.publicationId, id))
         .orderBy(asc(publishAttempt.startedAt));
-      return toDto(row, attempts);
+      const links = this.links
+        ? (await this.links.forPublication(id)).map((l) => ({
+            shown: this.links!.shortUrl(l.code),
+            target: l.targetUrl,
+            clicks: l.clicks,
+          }))
+        : [];
+      return toDto(row, attempts, links);
     });
   }
 
@@ -224,7 +238,11 @@ export class PublicationService {
   }
 }
 
-function toDto(p: Publication, attempts: PublishAttempt[]): PublicationDto {
+function toDto(
+  p: Publication,
+  attempts: PublishAttempt[],
+  links: PublicationDto['links'] = [],
+): PublicationDto {
   return {
     id: p.id,
     postId: p.postId,
@@ -246,6 +264,10 @@ function toDto(p: Publication, attempts: PublishAttempt[]): PublicationDto {
     lastErrorCode: p.lastErrorCode,
     lastErrorMessage: p.lastErrorMessage,
     writebackState: p.writebackState,
+    firstCommentState: p.firstCommentState,
+    firstCommentId: p.firstCommentId,
+    firstCommentError: p.firstCommentError,
+    links,
     attempts: attempts.map((a) => ({
       attemptNo: a.attemptNo,
       cycleNo: a.cycleNo,

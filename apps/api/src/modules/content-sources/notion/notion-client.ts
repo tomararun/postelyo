@@ -35,6 +35,8 @@ export interface NotionProperty {
   type: string;
   /** Present for select / multi_select / status properties. */
   options?: NotionPropertyOption[];
+  /** Present for relation properties: the related database (Phase 4). */
+  relationDatabaseId?: string;
 }
 
 export interface NotionDatabase {
@@ -112,11 +114,13 @@ export class NotionClient {
             .filter((n): n is string => typeof n === 'string')
             .map((n) => ({ name: n }))
         : undefined;
+      const relationDb = typed['database_id'];
       properties[name] = {
         id: typeof p['id'] === 'string' ? p['id'] : name,
         name,
         type,
         ...(options ? { options } : {}),
+        ...(typeof relationDb === 'string' ? { relationDatabaseId: relationDb } : {}),
       };
     }
     return {
@@ -227,6 +231,34 @@ export class NotionClient {
     return out;
   }
 
+  /** Adds or changes database properties (Phase 4: relations added after creation). */
+  async updateDatabase(databaseId: string, body: Record<string, unknown>): Promise<void> {
+    await this.request('PATCH', `/databases/${encodeURIComponent(databaseId)}`, body);
+  }
+
+  /** Creates a page (recurring instances, promoted ideas); `children` are block objects. */
+  async createPage(body: Record<string, unknown>): Promise<{ id: string; url: string }> {
+    const json = await this.request('POST', '/pages', body);
+    return {
+      id: typeof json['id'] === 'string' ? json['id'] : '',
+      url: typeof json['url'] === 'string' ? json['url'] : '',
+    };
+  }
+
+  /** Appends blocks to a page or block. */
+  async appendBlockChildren(blockId: string, children: unknown[]): Promise<void> {
+    for (let i = 0; i < children.length; i += 100) {
+      await this.request('PATCH', `/blocks/${encodeURIComponent(blockId)}/children`, {
+        children: children.slice(i, i + 100),
+      });
+    }
+  }
+
+  /** Archives a block (Notion's delete). */
+  async deleteBlock(blockId: string): Promise<void> {
+    await this.request('DELETE', `/blocks/${encodeURIComponent(blockId)}`);
+  }
+
   /** Creates a database under a page (template setup); returns id and URL. */
   async createDatabase(body: Record<string, unknown>): Promise<{ id: string; url: string }> {
     const json = await this.request('POST', '/databases', body);
@@ -237,7 +269,7 @@ export class NotionClient {
   }
 
   private async request(
-    method: 'GET' | 'POST' | 'PATCH',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     path: string,
     body?: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {

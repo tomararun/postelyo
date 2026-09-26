@@ -39,6 +39,8 @@ export interface ProviderCapabilities {
   image?: ImageSpec;
   /** Provider refuses posts without an image (Instagram). */
   imageRequired?: boolean;
+  /** Phase 4: the adapter implements `comment()` (first comment after publishing). */
+  firstComment?: boolean;
 }
 
 /** What the engine knows about the target account; never contains secrets. */
@@ -140,6 +142,24 @@ export type PublishResult =
   | { kind: 'terminal_error'; reason: string; code: TerminalErrorCode; raw?: unknown }
   | { kind: 'ambiguous'; reason: string; raw?: unknown };
 
+/** Phase 4: a comment posted under a publication right after it went live. */
+export interface CommentInput {
+  publicationId: string;
+  account: SocialAccountRef;
+  /** The provider post id returned by `publish`. */
+  providerPostId: string;
+  text: string;
+}
+
+/**
+ * A comment never changes the publication's outcome. `failed` with
+ * `retryable: true` means a later attempt may succeed (the engine retries a
+ * bounded number of times); `retryable: false` records the reason and stops.
+ */
+export type CommentResult =
+  | { kind: 'posted'; commentId: string; raw?: unknown }
+  | { kind: 'failed'; reason: string; retryable: boolean; raw?: unknown };
+
 /** A post seen at the provider; used to reconcile `ambiguous` outcomes. */
 export interface ProviderPostRef {
   providerPostId: string;
@@ -167,6 +187,12 @@ export interface PublishingProvider {
   ): Promise<ProviderPostRef[]>;
   /** Optional: revoke the token at the provider on disconnect (best effort). */
   revoke?(account: SocialAccountRef, ctx: ProviderContext): Promise<void>;
+  /**
+   * Optional (Phase 4): post `text` as a comment under `providerPostId`.
+   * Declared through `capabilities().firstComment`; must never throw for a
+   * normal call and must be safe to call once per publication.
+   */
+  comment?(input: CommentInput, ctx: ProviderContext): Promise<CommentResult>;
 }
 
 /** Content types re-exported so adapters depend on this contract only. */

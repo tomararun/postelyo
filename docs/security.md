@@ -193,6 +193,7 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 
 - Data collected: user email/name, workspace settings, social account display metadata, content snapshots, publication results, audit trail.
 - Data minimisation: only the connected Notion database is read; only properties in the contract are parsed.
+- Short links (Phase 4) are public redirects by design: a code reveals only the destination URL the workspace itself published. Click counts are aggregate, no IP or user agent is stored. Approvals record who approved what fingerprint and when (`approval.granted`/`approval.revoked` audits); reviewer lists are workspace settings that admins manage.
 - Deletion (built in Phase 3): disconnecting a source or account wipes credentials immediately; deleting a workspace soft-deletes it at once (hidden, API access ends, waiting publications cancelled, sources disabled) and the `workspace-delete` job purges it 10 minutes later: tokens revoked best-effort, the workspace row deleted with cascades, `audit_log.workspace_id` nulled by the FK, and two `workspace.deleted` audit entries (`requested`, `purged`) kept with counts only. See [compliance.md](./compliance.md) for the data inventory and platform checklists.
 - Content snapshots are retained for the lifetime of the publication for auditability; a per-workspace retention setting is a roadmap item.
 - Provider policies (LinkedIn API Terms, Notion terms) must be reviewed before public launch; the app must display which data it stores.
@@ -211,3 +212,5 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 - [ ] New writeback properties reviewed against the allow-list
 - [ ] New limit-relevant resources (accounts, members, posts) go through the billing service's capacity checks
 - [ ] New Stripe event types handled idempotently and mapped in `stripe_event.outcome`
+- [ ] Phase 4: pages Postelyo creates in Notion (instances, promoted ideas) copy only allow-listed properties and supported block types; no system column is ever written from user text except through the writeback allow-list
+- [ ] Phase 4: short-link redirects only to `http(s)` targets that came from the workspace's own content; codes are random and rate-limited by the platform

@@ -17,6 +17,11 @@ import { HeartbeatService } from './modules/ops/heartbeat.service.js';
 import { MetricsService } from './modules/ops/metrics.service.js';
 import { TokenExpiryService } from './modules/ops/token-expiry.service.js';
 import { PostIngestService } from './modules/posts/post-ingest.service.js';
+import { ApprovalService } from './modules/posts/approval.service.js';
+import { CampaignService } from './modules/campaigns/campaign.service.js';
+import { IdeaService } from './modules/posts/idea.service.js';
+import { LinkService } from './modules/links/link.service.js';
+import { SeriesService } from './modules/posts/series.service.js';
 import { PostQueryService } from './modules/posts/post-query.service.js';
 import { PublishEngine } from './modules/publishing/engine.js';
 import type { JobEnqueuer } from './modules/publishing/jobs.js';
@@ -113,6 +118,12 @@ export interface Services {
   metrics: MetricsService;
   enqueue: JobEnqueuer;
   clock: Clock;
+  /** Phase 4 */
+  links: LinkService;
+  campaigns: CampaignService;
+  series: SeriesService;
+  ideas: IdeaService;
+  approvals: ApprovalService;
 }
 
 /** One composition root shared by the api and worker roles (architecture §2.1). */
@@ -187,12 +198,20 @@ export function buildServices(deps: ServiceDeps): Services {
   socialAccounts.registerCapacityGuard((workspaceId, adding) =>
     billing.assertAccountCapacity(workspaceId, adding),
   );
+  // Phase 4 companions.
+  const links = new LinkService({ db: deps.db, clock, appBaseUrl: deps.env.APP_BASE_URL });
+  const campaigns = new CampaignService({ db: deps.db, clock, logger: deps.logger });
+  const series = new SeriesService({ db: deps.db, clock, logger: deps.logger });
+  const ideas = new IdeaService({ db: deps.db, clock, logger: deps.logger });
+  const approvals = new ApprovalService({ db: deps.db, clock, enqueue: deps.enqueue });
   const ingest = new PostIngestService({
     db: deps.db,
     providers,
     media,
     clock,
     logger: deps.logger,
+    campaigns,
+    approvals,
     postLimit: async (workspaceId) => {
       const r = await billing.postLimitReached(workspaceId);
       return r.reached
@@ -206,6 +225,9 @@ export function buildServices(deps: ServiceDeps): Services {
     ingest,
     logger: deps.logger,
     clock,
+    campaigns,
+    series,
+    ideas,
     ...fetchOpt,
   });
   const scheduler = new SchedulerService({
@@ -223,6 +245,7 @@ export function buildServices(deps: ServiceDeps): Services {
     clock,
     logger: deps.logger,
     workerId: deps.workerId,
+    links,
     ...(deps.random ? { random: deps.random } : {}),
   });
   const resultWriteback = new ResultWritebackService({
@@ -230,9 +253,10 @@ export function buildServices(deps: ServiceDeps): Services {
     contentSources,
     clock,
     logger: deps.logger,
+    links,
     ...fetchOpt,
   });
-  const publications = new PublicationService(deps.db, deps.enqueue, clock);
+  const publications = new PublicationService(deps.db, deps.enqueue, clock, links);
   const reconciliation = new ReconciliationService({
     db: deps.db,
     providers,
@@ -324,5 +348,10 @@ export function buildServices(deps: ServiceDeps): Services {
     metrics,
     enqueue: deps.enqueue,
     clock,
+    links,
+    campaigns,
+    series,
+    ideas,
+    approvals,
   };
 }

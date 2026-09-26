@@ -25,7 +25,15 @@ export default async function SetupPage({
   if (!canManage) redirect(`/w/${workspaceId}/connections`);
   if (!source) redirect(`/w/${workspaceId}/connections`);
 
-  let options: { pages: Option[]; databases: Option[] } | null = null;
+  let options: {
+    pages: Option[];
+    databases: Option[];
+    suggested: {
+      contentDatabaseId: string;
+      campaignsDatabaseId: string | null;
+      ideasDatabaseId: string | null;
+    } | null;
+  } | null = null;
   let loadError: string | null = null;
   try {
     options = await api(`/v1/workspaces/${workspaceId}/content-sources/${source}/setup`);
@@ -42,11 +50,35 @@ export default async function SetupPage({
       <h1 className="text-xl font-semibold">Set up Notion</h1>
       {error && <Notice kind="error">{error}</Notice>}
       {loadError && <Notice kind="error">{loadError}</Notice>}
+      {options?.suggested && (
+        <Card title="Connect the duplicated Postelyo template">
+          <p className="mb-3 text-sm text-[var(--muted)]">
+            We found the databases of the Postelyo template in your Notion workspace
+            {options.suggested.campaignsDatabaseId ? ', including Campaigns' : ''}
+            {options.suggested.ideasDatabaseId ? ' and Ideas' : ''}. Connect them in one step; the
+            calendar and board views come with the template.
+          </p>
+          <form action={action}>
+            <input type="hidden" name="mode" value="existing" />
+            <input type="hidden" name="databaseId" value={options.suggested.contentDatabaseId} />
+            {options.suggested.ideasDatabaseId && (
+              <input
+                type="hidden"
+                name="ideasDatabaseId"
+                value={options.suggested.ideasDatabaseId}
+              />
+            )}
+            <Button>Connect the template</Button>
+          </form>
+        </Card>
+      )}
       {options && (
         <div className="grid gap-6 md:grid-cols-2">
           <Card title="Create the content database">
             <p className="mb-3 text-sm text-[var(--muted)]">
-              Postelyo creates a ready-made database under a page you shared with it.
+              Postelyo creates the content database plus Campaigns and Ideas under a page you shared
+              with it. Views (calendar, board) must be added by hand; the duplicated template ships
+              them ready-made.
             </p>
             {options.pages.length === 0 ? (
               <Notice kind="info">

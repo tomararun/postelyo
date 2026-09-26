@@ -51,7 +51,15 @@ export type AuditEvent =
   | 'publication.reconciliation_unresolved'
   | 'webhook.received'
   | 'alert.sent'
-  | 'notification.sent';
+  | 'notification.sent'
+  | 'campaign.summary_written'
+  | 'series.instance_created'
+  | 'series.instance_updated'
+  | 'evergreen.slot_filled'
+  | 'idea.promoted'
+  | 'approval.granted'
+  | 'approval.revoked'
+  | 'publication.first_comment';
 
 export type AuditEntityType =
   | 'workspace'
@@ -64,7 +72,9 @@ export type AuditEntityType =
   | 'publication'
   | 'webhook_event'
   | 'alert'
-  | 'worker';
+  | 'worker'
+  | 'campaign'
+  | 'approval';
 
 export interface AuditEntry {
   workspaceId: string | null;

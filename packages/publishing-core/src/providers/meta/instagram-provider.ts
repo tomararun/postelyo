@@ -1,4 +1,6 @@
 import type {
+  CommentInput,
+  CommentResult,
   PostSnapshot,
   ProviderCapabilities,
   ProviderContext,
@@ -18,7 +20,7 @@ import {
 } from '../../render.js';
 import { asRecord, classifyNetworkError, parseJson, rawOf, str } from '../shared/graph-errors.js';
 import { mediaUrlFailure } from './facebook-provider.js';
-import { GRAPH_URL, classifyGraph, form } from './graph.js';
+import { GRAPH_URL, classifyGraph, form, graphComment } from './graph.js';
 
 /**
  * Instagram adapter (Phase 2) for professional accounts linked to a Facebook
@@ -58,6 +60,7 @@ export class InstagramProvider implements PublishingProvider {
       maxImages: 1,
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: INSTAGRAM_MAX_IMAGE_BYTES,
+      firstComment: true,
       imageRequired: true,
       image: {
         delivery: 'url',
@@ -175,6 +178,11 @@ export class InstagramProvider implements PublishingProvider {
       ...(permalink ? { url: permalink } : {}),
       raw,
     };
+  }
+
+  /** First comment under the media (`/{ig-media-id}/comments`). */
+  async comment(input: CommentInput, ctx: ProviderContext): Promise<CommentResult> {
+    return graphComment(this.fetchImpl, this.graphUrl, input, ctx, 'Instagram');
   }
 
   async lookupRecent(

@@ -1,4 +1,6 @@
 import type {
+  CommentInput,
+  CommentResult,
   LoadedMedia,
   PostSnapshot,
   ProviderCapabilities,
@@ -65,6 +67,7 @@ export class XProvider implements PublishingProvider {
       maxImages: 1,
       supportedImageMimeTypes: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
       maxImageBytes: X_MAX_IMAGE_BYTES,
+      firstComment: true,
       image: { delivery: 'upload' },
     };
   }
@@ -208,6 +211,47 @@ export class XProvider implements PublishingProvider {
     }
     await input.onMediaUploaded?.(media.assetId, id, loaded.contentHash);
     return { ok: true, value: id };
+  }
+
+  /** First comment on X is a reply to the published tweet. */
+  async comment(input: CommentInput, ctx: ProviderContext): Promise<CommentResult> {
+    let res: Response;
+    try {
+      res = await this.fetchImpl(X_TWEETS_URL, {
+        method: 'POST',
+        headers: this.headers(ctx, { 'content-type': 'application/json' }),
+        body: JSON.stringify({
+          text: input.text,
+          reply: { in_reply_to_tweet_id: input.providerPostId },
+        }),
+        ...(ctx.signal ? { signal: ctx.signal } : {}),
+      });
+    } catch (err) {
+      return {
+        kind: 'failed',
+        reason: `X unreachable: ${(err as Error).message}`,
+        retryable: true,
+      };
+    }
+    const text = await res.text().catch(() => '');
+    const raw = rawOf(res.status, text);
+    if (res.status === 201 || res.status === 200) {
+      const id = str(asRecord(parseJson(text)['data']), 'id');
+      return id
+        ? { kind: 'posted', commentId: id, raw }
+        : {
+            kind: 'failed',
+            reason: 'X returned success without a reply id',
+            retryable: false,
+            raw,
+          };
+    }
+    return {
+      kind: 'failed',
+      reason: `X rejected the reply: ${messageOf(text)}`,
+      retryable: res.status === 429 || res.status >= 500,
+      raw,
+    };
   }
 
   private headers(ctx: ProviderContext, extra: Record<string, string>): Record<string, string> {

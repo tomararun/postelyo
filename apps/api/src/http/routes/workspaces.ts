@@ -28,6 +28,35 @@ const patchSchema = z
       .optional(),
     notificationEmail: z.string().nullable().optional(),
     alertCopyEmail: z.string().nullable().optional(),
+    // Phase 4
+    links: z
+      .object({
+        utm: z
+          .object({
+            source: z.string().max(100).optional(),
+            medium: z.string().max(100).optional(),
+            campaign: z.string().max(100).optional(),
+          })
+          .strict()
+          .optional(),
+        shorten: z.boolean().optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    evergreen: z
+      .object({
+        slots: z.array(z.object({ weekday: z.number().int(), time: z.string() }).strict()).max(50),
+        minGapDays: z.number().int().optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
+    approval: z
+      .object({ required: z.boolean(), reviewers: z.array(z.string()).max(100) })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -69,6 +98,9 @@ export function workspaceDto(w: Workspace) {
     },
     notificationEmail: settings.notificationEmail ?? null,
     alertCopyEmail: settings.alertCopyEmail ?? null,
+    links: settings.links ?? null,
+    evergreen: settings.evergreen ?? null,
+    approval: settings.approval ?? null,
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
   };

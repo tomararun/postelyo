@@ -1,5 +1,7 @@
 import { contentForProvider, contentToPlainText, textFingerprint } from '../../render.js';
 import type {
+  CommentInput,
+  CommentResult,
   LoadedMedia,
   MediaUrl,
   PostSnapshot,
@@ -24,6 +26,8 @@ export interface FakeProviderOptions {
   latencyMs?: number;
   /** Provider id whose per-platform text override the fake should honour (default: `fake`). */
   renderAs?: string;
+  /** Phase 4: decide the outcome of `comment()` per call; posted when absent. */
+  commentDecide?: (input: CommentInput, callNo: number) => CommentResult;
 }
 
 export interface FakeCall {
@@ -48,6 +52,8 @@ export class FakeProvider implements PublishingProvider {
   readonly recentPosts = new Map<string, ProviderPostRef[]>();
   /** When set, `lookupRecent` throws (simulates a lookup outage). */
   lookupError: Error | null = null;
+  /** Phase 4: every first comment the fake was asked to post. */
+  readonly comments: { input: CommentInput; result: CommentResult }[] = [];
   private readonly script: PublishResult[];
   private seq = 0;
 
@@ -92,8 +98,17 @@ export class FakeProvider implements PublishingProvider {
       maxImages: 1,
       supportedImageMimeTypes: ['image/jpeg', 'image/png'],
       maxImageBytes: 8 * 1024 * 1024,
+      firstComment: true,
       ...this.opts.capabilities,
     };
+  }
+
+  async comment(input: CommentInput, _ctx: ProviderContext): Promise<CommentResult> {
+    const result: CommentResult = this.opts.commentDecide
+      ? this.opts.commentDecide(input, this.comments.length)
+      : { kind: 'posted', commentId: `fake-comment-${this.comments.length + 1}` };
+    this.comments.push({ input, result });
+    return result;
   }
 
   render(post: PostSnapshot, account?: SocialAccountRef): RenderedContent {

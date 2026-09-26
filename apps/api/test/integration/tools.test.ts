@@ -27,14 +27,25 @@ describe('pilot tooling', () => {
     expect(result.validation.warnings).toEqual([]);
     expect(result.url).toContain('notion.so');
 
-    const create = fake.requests.find(
+    // The suite creates Campaigns and Ideas first, then the content database; relations follow by PATCH.
+    const creates = fake.requests.filter(
       (r) => r.url.endsWith('/v1/databases') && r.method === 'POST',
     );
+    const create = creates.find((r) => r.body.includes('"Postelyo Content"'));
     const body = JSON.parse(create!.body) as {
       parent: { page_id: string };
       properties: Record<string, unknown>;
     };
     expect(body.parent.page_id).toBe('1f2e3d4c-5b6a-47f8-a9b0-c1d2e3f40507');
+    expect(creates.some((r) => r.body.includes('"Postelyo Campaigns"'))).toBe(true);
+    expect(creates.some((r) => r.body.includes('"Postelyo Ideas"'))).toBe(true);
+    const relations = fake.requests.find(
+      (r) => r.method === 'PATCH' && r.url.endsWith(`/v1/databases/${result.databaseId}`),
+    );
+    expect(relations).toBeDefined();
+    expect(
+      Object.keys((JSON.parse(relations!.body) as { properties: object }).properties).sort(),
+    ).toEqual(['Campaign', 'Repeat Of']);
     expect(Object.keys(body.properties).sort()).toEqual(
       [
         'Media',
@@ -54,6 +65,12 @@ describe('pilot tooling', () => {
         'Instagram Caption',
         'Status',
         'Time Zone',
+        // Phase 4 (template v2); relations are added after creation
+        'Repeat',
+        'Repeat Until',
+        'First Comment',
+        'Approval',
+        'Link Report',
       ].sort(),
     );
 

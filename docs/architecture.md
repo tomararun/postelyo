@@ -332,6 +332,19 @@ Edits after `scheduled` produce a drift warning in the `Postelyo Note` property 
 
 ---
 
+### 7.4 Content operations in Notion (Phase 4)
+
+Everything below is additive to the contract (docs/notion-template.md v2) and runs inside the Notion sync with the same token, so no new job, credential path or webhook is needed.
+
+- **Companion databases.** `Postelyo Campaigns` and `Postelyo Ideas` are created next to the content database (`createTemplateSuite`) or discovered on connect: campaigns through the `Campaign` relation's target, ideas by title or the wizard's choice. Their ids and property maps live in `content_source.config`; their incremental cursors share `content_source.cursor` with the main loop (merged, never replaced).
+- **Campaigns.** Pages of the campaigns database are mirrored into `campaign`; `post.campaign_id` follows the page's relation. After every sync the service recomputes counts, next publish time and first/latest links per campaign and patches the campaign page only when the summary hash changed (`campaign.summary_written` audit).
+- **Series.** A `Scheduled` page with `Repeat` becomes a series. Occurrences are computed from the page's date string (time and offset preserved; monthly clamps to month end) up to 60 days ahead or `Repeat Until`. Each missing occurrence becomes a real page in the same database (`Status = Scheduled`, `Repeat Of` → source, properties and body copied, external media only) plus a placeholder `post` row carrying `parent_post_id`, `series_key` and `series_fp`; the next sync ingests it like any page. Source edits propagate to future instances whose own text fingerprint still equals the one they were generated with (`series_fp`); hand-edited instances are skipped with a note. Instances due within five minutes are never rewritten.
+- **Evergreen.** `Repeat = Evergreen` on a `Ready` page joins the pool. Workspace slots (`evergreen.slots`, weekday + time in the workspace zone) 14 days ahead are filled with the least recently shared pool page that respects `minGapDays` (default 30); the instance is an ordinary Scheduled page keyed `evergreen:<slot instant>`.
+- **First comment.** `CanonicalContent.firstComment` comes from the `First Comment` column. Publications are created with `first_comment_state = pending` when the provider declares `capabilities().firstComment`. After a successful publish the engine claims the row (`pending → posting`, conditional update, so it runs once), calls `provider.comment()`, and records `posted` or `failed`; retryable failures go back to `pending` and maintenance retries them up to three attempts. The comment never changes the publication outcome; the Notion note and the dashboard report it.
+- **Links.** `workspace.settings.links` holds UTM presets (`{campaign}` and `{platform}` placeholders) and the short-link switch. The engine applies them to the rendered content of each publication before `render()`: UTM parameters are appended unless the URL already has any, and links are replaced by `${APP_BASE_URL}/l/<code>` backed by `short_link` rows keyed (publication, target), so retries reuse codes. `/l/{code}` redirects and counts. The Notion source is never rewritten; `Link Report` and the publication page show the mapping and clicks.
+- **Approvals.** With `approval.required`, a reviewer (listed user or any owner) approves a `Ready` post in the dashboard. The approval stores a text-only fingerprint (title, platforms, body, overrides, first comment) of what the page said; every sync of a Ready page refreshes `post.approval_fp` and writes `Approval`/`Postelyo Status`. Scheduling compares the snapshot's fingerprint with the latest approval and refuses with `APPROVAL_REQUIRED` on mismatch. Approving enqueues a page sync so the Notion column flips without an edit. Workspaces without the policy are unchanged.
+- **Ideas.** Pages of the ideas database with `Status = Promote` become `Draft` pages in the content database (title, notes, body, platforms); the idea gets `Promoted` and `Post URL` (`idea.promoted` audit).
+
 ## 8. Scheduling architecture
 
 ### 8.1 Time handling
@@ -607,6 +620,18 @@ GET  /privacy   GET /terms
 
 Plan-limit refusals answer `402 { code: "plan_limit" }`; the ingest path records a `PLAN_LIMIT` validation error on the post instead.
 
+```
+# Phase 4 (content operations)
+GET  /v1/workspaces/{id}/campaigns                           mirrored Campaigns pages with their last summary
+GET  /v1/workspaces/{id}/approvals                           Ready posts waiting for a reviewer (policy on)
+POST /v1/workspaces/{id}/posts/{postId}/approve              reviewer or owner; binds the current fingerprint
+DELETE /v1/workspaces/{id}/posts/{postId}/approvals          admin; revokes open approvals
+GET  /l/{code}                                               short link redirect (public), counts the click
+PATCH /v1/workspaces/{id} { links, evergreen, approval }     Phase 4 settings (null clears)
+```
+
+`GET /v1/workspaces/{id}/publications/{pid}` also returns `firstCommentState`/`firstCommentId`/`firstCommentError` and the publication's tracked `links` with click counts; the setup wizard's `GET …/setup` returns `suggested` databases when a duplicated Postelyo template is found, and `POST …/setup` accepts `ideasDatabaseId` in `existing` mode.
+
 ### 14.3 Internal module boundaries
 
 Modules expose TypeScript service interfaces, not HTTP, to each other. The HTTP layer is thin: parse → authorize → call service → map result. This is what allows the future native editor, public API and AI features to reuse the same services.
@@ -803,3 +828,10 @@ Explicitly **not** done in the MVP: microservices, event bus, multi-region, Kube
 | D30 (2026-09-26) | The dashboard is a thin Next.js app calling the api over HTTP with the visitor's cookie; no shared Drizzle access | Shared database package used by both apps | One place enforces tenancy and limits; the web app cannot bypass RLS or plan checks, and the api stays the single deployable that owns data. |
 | D31 (2026-09-26) | Workspace deletion is soft delete now, purge by job after 10 minutes, audit anonymised by the FK (`workspace_id` set null) | Immediate hard delete | Cancels in-flight work cleanly, gives a short undo window for operators, keeps the audit trail without tenant attribution. |
 | D32 (2026-09-26) | Notion public OAuth creates a pending source (`status = disabled`, no database) that a setup step completes; the pasted-token path stays | Single-step connect requiring a database id up front | Users rarely know a database id; the wizard lists what they shared and creates the template for them. |
+| D33 (2026-09-26) | Views ship in a duplicated Notion template page; API-created databases get properties only plus a documented recipe | Generate views through the API | Notion's API cannot create views; the OAuth template duplication is the only automated path. |
+| D34 (2026-09-26) | Recurring and evergreen instances are real pages in the content database, linked by `Repeat Of` | Virtual occurrences expanded at schedule time | Instances stay visible in the calendar, editable and cancellable like any page; provenance is a relation plus `parent_post_id`. |
+| D35 (2026-09-26) | Source edits reach only future instances whose text fingerprint still matches the generated one | Always overwrite; never propagate | Hand edits are the user's intent; unedited copies should follow the source. |
+| D36 (2026-09-26) | First comment is an optional provider capability run after `finish()`, claimed by a conditional update, bounded retries via maintenance | Part of `publish()`; a separate job | Never risks the exactly-once publish path; runs at most once; needs no new queue. |
+| D37 (2026-09-26) | Links are rewritten per publication at render time with stable codes per (publication, target); the Notion page is never touched | Rewrite the Notion source; codes per post | Retries are idempotent, per-platform UTM values are possible, and the author's page stays theirs. |
+| D38 (2026-09-26) | Approvals are recorded in the dashboard against a text-only fingerprint; Notion mirrors the state; scheduling is refused on mismatch | Notion person property; approve by editing the page | Notion cannot restrict who edits a column, and Postelyo's own writebacks would invalidate an edit-time based check. |
+| D39 (2026-09-26) | Companion databases (campaigns, ideas) are synced inside the content sync with merged cursor keys | Separate jobs and tokens | One token read, one schedule, one failure surface; the cursor merge keeps the loops independent. |

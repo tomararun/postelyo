@@ -8,7 +8,10 @@ import type { Role, TenantContext } from '../tenancy/tenant-context.js';
 import {
   MAX_DAILY_CAP_PER_ACCOUNT,
   readSettings,
+  type ApprovalSettings,
+  type EvergreenSettings,
   type FlaggedProvider,
+  type LinkSettings,
   type WorkspaceSettings,
 } from './settings.js';
 import { slugSuffix, workspaceDefaultsFromEmail } from './slug.js';
@@ -40,6 +43,10 @@ export interface WorkspacePatch {
   /** Phase 3 notification settings; null clears. */
   notificationEmail?: string | null | undefined;
   alertCopyEmail?: string | null | undefined;
+  /** Phase 4: replaced wholesale when present; null clears. */
+  links?: LinkSettings | null | undefined;
+  evergreen?: EvergreenSettings | null | undefined;
+  approval?: ApprovalSettings | null | undefined;
 }
 
 const DEFAULT_TIMEZONE = 'UTC';
@@ -206,6 +213,25 @@ export class WorkspaceService {
         issues.push({ path: k, message: 'must be an email address' });
       }
     }
+    if (patch.evergreen) {
+      for (const s of patch.evergreen.slots) {
+        if (!Number.isInteger(s.weekday) || s.weekday < 1 || s.weekday > 7)
+          issues.push({ path: 'evergreen.slots', message: 'weekday must be 1 (Mon) to 7 (Sun)' });
+        if (!PUBLISH_TIME_RE.test(s.time))
+          issues.push({ path: 'evergreen.slots', message: 'time must be HH:MM' });
+      }
+      if (patch.evergreen.minGapDays !== undefined) {
+        const g = patch.evergreen.minGapDays;
+        if (!Number.isInteger(g) || g < 1 || g > 365)
+          issues.push({ path: 'evergreen.minGapDays', message: 'integer between 1 and 365' });
+      }
+    }
+    if (patch.links?.utm) {
+      for (const [k, v] of Object.entries(patch.links.utm)) {
+        if (typeof v === 'string' && v.length > 100)
+          issues.push({ path: `links.utm.${k}`, message: 'at most 100 characters' });
+      }
+    }
     if (issues.length > 0) throw new ValidationError(issues);
 
     return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
@@ -221,7 +247,10 @@ export class WorkspaceService {
         patch.notionWebhooks !== undefined ||
         patch.providers !== undefined ||
         patch.notificationEmail !== undefined ||
-        patch.alertCopyEmail !== undefined
+        patch.alertCopyEmail !== undefined ||
+        patch.links !== undefined ||
+        patch.evergreen !== undefined ||
+        patch.approval !== undefined
       ) {
         // Unknown keys are kept; known keys are replaced or removed explicitly.
         const merged: Record<string, unknown> = { ...(before.settings as Record<string, unknown>) };
@@ -246,6 +275,16 @@ export class WorkspaceService {
             delete settings[k];
             delete merged[k];
           } else if (v !== undefined) settings[k] = v;
+        }
+        for (const k of ['links', 'evergreen', 'approval'] as const) {
+          const v = patch[k];
+          if (v === null) {
+            delete settings[k];
+            delete merged[k];
+          } else if (v !== undefined) {
+            // Structured settings replace the previous value; the reader normalises them.
+            (settings as unknown as Record<string, unknown>)[k] = v;
+          }
         }
         values.settings = { ...merged, ...settings };
       }

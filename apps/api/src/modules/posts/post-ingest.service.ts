@@ -20,14 +20,19 @@ import { MediaError } from '../media/media-fetcher.js';
 import { enrichRenderedMedia, type MediaService } from '../media/media.service.js';
 import { buildCanonicalContent, type SourcePost } from '../content-sources/notion/notion-mapper.js';
 import {
+  APPROVAL_STATUS,
   POSTELYO_STATUS,
+  PRE_PUBLISH_STATUSES,
   clearedWriteback,
   type DesiredWriteback,
 } from '../content-sources/notion/notion-writeback.js';
+import type { CampaignService } from '../campaigns/campaign.service.js';
+import { approvalFingerprint, type ApprovalService } from './approval.service.js';
+import { parseRepeatRule } from './series.service.js';
 import { accountRef, providerIdOf } from '../publishing/engine.js';
 import type { AccountType } from '../publishing/provider.js';
 import type { ProviderRegistry } from '../publishing/registry.js';
-import { providerEnabled } from '../workspaces/settings.js';
+import { approvalRequired, providerEnabled } from '../workspaces/settings.js';
 import { resolveSchedule } from '../scheduling/schedule-time.js';
 import type { TenantContext } from '../tenancy/tenant-context.js';
 import type { CanonicalContent, PostSnapshot } from './content.js';
@@ -96,6 +101,10 @@ export interface PostIngestDeps {
   logger: Logger;
   /** Phase 3 plan limit: resolves to a reason when the workspace may not schedule more posts this month. */
   postLimit?: (workspaceId: string) => Promise<string | null>;
+  /** Phase 4: campaign relation → `post.campaign_id`. */
+  campaigns?: CampaignService;
+  /** Phase 4: opt-in approval enforcement. */
+  approvals?: ApprovalService;
 }
 
 /**
@@ -166,6 +175,7 @@ export class PostIngestService {
     }
 
     // Snapshot: reload the body when the page changed since the last snapshot.
+    let approvalColumn: string | undefined;
     const needsSnapshot =
       !existing ||
       existing.contentHash === '' ||
@@ -199,6 +209,32 @@ export class PostIngestService {
       }
     }
 
+    // Approval policy (Phase 4): the latest approval must match what is about to be scheduled.
+    if (content && this.deps.approvals && approvalRequired(input.workspace)) {
+      const approvalFp = approvalFingerprint({
+        title: page.title,
+        platforms: page.platforms,
+        content,
+      });
+      const latest = await this.deps.approvals.latestFingerprint(postRow.id);
+      if (!latest) {
+        approvalColumn = APPROVAL_STATUS.awaiting;
+        issues.push({
+          code: 'APPROVAL_REQUIRED',
+          message: 'A reviewer must approve this post before it can be scheduled.',
+        });
+      } else if (latest.fp !== approvalFp) {
+        approvalColumn = APPROVAL_STATUS.changed;
+        issues.push({
+          code: 'APPROVAL_REQUIRED',
+          message: 'The post changed after it was approved; a reviewer must approve it again.',
+        });
+      } else {
+        approvalColumn = APPROVAL_STATUS.approved;
+      }
+      await db.update(post).set({ approvalFp }).where(eq(post.id, postRow.id));
+    }
+
     if (content && issues.length === 0) {
       const snapshot: PostSnapshot = {
         postId: postRow.id,
@@ -220,8 +256,11 @@ export class PostIngestService {
     }
 
     if (issues.length > 0 || !schedule?.ok) {
-      return this.validationFailed(input, postRow, pubs, issues, warnings);
+      return this.validationFailed(input, postRow, pubs, issues, warnings, approvalColumn);
     }
+    const wantsComment = (provider: SocialProvider) =>
+      Boolean(content.firstComment?.trim()) &&
+      this.deps.providers.get(providerIdOf(provider)).capabilities().firstComment === true;
 
     // --- Scheduled: apply ---------------------------------------------------
     const sched = schedule.value;
@@ -290,6 +329,7 @@ export class PostIngestService {
             scheduledTz: sched.timeZone,
             scheduledLocal: sched.local,
             cycleNo,
+            firstCommentState: wantsComment(t.provider) ? 'pending' : null,
           });
           await recordAudit(tx, {
             workspaceId: ctx.workspaceId,
@@ -319,6 +359,14 @@ export class PostIngestService {
           if (desiredState === 'blocked') anyBlocked = true;
           const timeChanged = current.scheduledAt.getTime() !== sched.scheduledAt.getTime();
           const stateChanged = current.state !== desiredState;
+          const commentState = wantsComment(t.provider) ? 'pending' : null;
+          if ((current.firstCommentState ?? null) !== commentState) {
+            touched = true;
+            await tx
+              .update(publication)
+              .set({ firstCommentState: commentState, updatedAt: now })
+              .where(eq(publication.id, current.id));
+          }
           if (timeChanged || stateChanged) {
             touched = true;
             assertPublicationTransition(current.state, desiredState);
@@ -383,6 +431,10 @@ export class PostIngestService {
               lastErrorMessage: null,
               writebackState: 'pending',
               writebackAttempts: 0,
+              firstCommentState: wantsComment(t.provider) ? 'pending' : null,
+              firstCommentId: null,
+              firstCommentError: null,
+              firstCommentAttempts: 0,
               updatedAt: now,
             })
             .where(eq(publication.id, current.id));
@@ -490,6 +542,7 @@ export class PostIngestService {
         postelyoStatus: result.anyBlocked ? POSTELYO_STATUS.needsReauth : POSTELYO_STATUS.scheduled,
         postelyoNote: note,
         postelyoId: result.pubIds.join(','),
+        ...(approvalColumn !== undefined ? { approval: approvalColumn } : {}),
       },
     };
   }
@@ -518,7 +571,16 @@ export class PostIngestService {
     const { ctx, page } = input;
     const now = this.deps.clock.now();
     const sourceEditedAt = page.lastEditedTime ? new Date(page.lastEditedTime) : now;
+    // Phase 4 provenance: campaign relation and the source page of a generated instance.
+    const campaignId = this.deps.campaigns
+      ? await this.deps.campaigns.resolveForPost(ctx, input.source, page.campaignIds)
+      : undefined;
+    const parent = page.repeatOf[0] ? await this.findPost(input.source.id, page.repeatOf[0]) : null;
     const base = {
+      ...(campaignId !== undefined ? { campaignId } : {}),
+      ...(parent && parent.externalId !== page.externalId ? { parentPostId: parent.id } : {}),
+      repeatRule: parseRepeatRule(page.repeat),
+      repeatUntil: page.repeatUntil,
       title: page.title,
       externalUrl: page.externalUrl,
       sourceStatus: page.sourceStatus,
@@ -635,6 +697,61 @@ export class PostIngestService {
       return n;
     });
 
+    const approvalsOn = Boolean(this.deps.approvals) && approvalRequired(input.workspace);
+    if (editorial === 'ready' && parseRepeatRule(page.repeat) === 'evergreen') {
+      return {
+        postId: postRow.id,
+        action: 'awaiting_schedule',
+        writeback: {
+          postelyoStatus: POSTELYO_STATUS.evergreenPool,
+          postelyoNote:
+            "In the evergreen pool. Postelyo re-shares it in the workspace's evergreen slots.",
+          postelyoId: '',
+          ...(approvalsOn ? { approval: null } : {}),
+        },
+      };
+    }
+    if (editorial === 'ready' && approvalsOn) {
+      // The reviewer approves what the page says now; refresh the fingerprint on every observation.
+      const body = await input.loadBody();
+      const mapped = buildCanonicalContent({ page, bodyBlocks: body, mediaAssetIds: [] });
+      const fp = approvalFingerprint({
+        title: page.title,
+        platforms: page.platforms,
+        content: mapped.content,
+      });
+      await this.deps.db
+        .update(post)
+        .set({ approvalFp: fp, updatedAt: now })
+        .where(eq(post.id, postRow.id));
+      const latest = await this.deps.approvals!.latestFingerprint(postRow.id);
+      const approved = latest !== null && latest.fp === fp;
+      const column = !latest
+        ? APPROVAL_STATUS.awaiting
+        : approved
+          ? APPROVAL_STATUS.approved
+          : APPROVAL_STATUS.changed;
+      return {
+        postId: postRow.id,
+        action: 'awaiting_schedule',
+        writeback: {
+          postelyoStatus: approved
+            ? page.publishDate
+              ? POSTELYO_STATUS.awaitingSchedule
+              : keepPublishedStatus(page.system.postelyoStatus)
+            : POSTELYO_STATUS.awaitingApproval,
+          postelyoNote: approved
+            ? page.publishDate
+              ? 'Approved. Set Status to Scheduled to publish.'
+              : 'Approved. Add a Publish Date and set Status to Scheduled.'
+            : latest
+              ? 'The post changed after it was approved; a reviewer must approve it again.'
+              : 'Waiting for a reviewer to approve this post in Postelyo.',
+          postelyoId: '',
+          approval: column,
+        },
+      };
+    }
     if (editorial === 'ready' && page.publishDate) {
       return {
         postId: postRow.id,
@@ -646,10 +763,21 @@ export class PostIngestService {
         },
       };
     }
+    const cleared = clearedWriteback(page.system);
+    const clearApproval = approvalsOn && page.system.approval !== null;
     return {
       postId: postRow.id,
       action: cancelled > 0 || editorial === 'cancelled' ? 'cancelled' : 'mirrored',
-      writeback: clearedWriteback(page.system),
+      writeback: clearApproval
+        ? {
+            ...(cleared ?? {
+              postelyoStatus: keepPublishedStatus(page.system.postelyoStatus),
+              postelyoNote: page.system.postelyoNote,
+              postelyoId: page.system.postelyoId,
+            }),
+            approval: null,
+          }
+        : cleared,
     };
   }
 
@@ -659,6 +787,7 @@ export class PostIngestService {
     pubs: Publication[],
     issues: ValidationIssue[],
     warnings: string[],
+    approvalColumn?: string,
   ): Promise<IngestResult> {
     const { ctx } = input;
     const now = this.deps.clock.now();
@@ -688,6 +817,7 @@ export class PostIngestService {
         postelyoStatus: POSTELYO_STATUS.validationError,
         postelyoNote: issues.map((i) => i.message).join(' '),
         postelyoId: '',
+        ...(approvalColumn !== undefined ? { approval: approvalColumn } : {}),
       },
     };
   }
@@ -812,6 +942,13 @@ export class PostIngestService {
 interface Target {
   provider: SocialProvider;
   account: SocialAccount;
+}
+
+/** A Published/Failed status written by the engine is never replaced by a pre-publish note. */
+function keepPublishedStatus(current: string | null): DesiredWriteback['postelyoStatus'] {
+  return current && !PRE_PUBLISH_STATUSES.includes(current)
+    ? (current as DesiredWriteback['postelyoStatus'])
+    : null;
 }
 
 function resolveTargets(

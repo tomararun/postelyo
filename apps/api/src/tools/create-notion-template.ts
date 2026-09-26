@@ -6,8 +6,8 @@ import {
 } from '../modules/content-sources/notion/notion-schema.js';
 import {
   TEMPLATE_TITLE,
+  createTemplateSuite,
   templateCoversContract,
-  templateCreateBody,
 } from '../modules/content-sources/notion/notion-template.js';
 
 export interface CreateTemplateInput {
@@ -21,6 +21,9 @@ export interface CreateTemplateInput {
 export interface CreateTemplateResult {
   databaseId: string;
   url: string;
+  /** Phase 4 companions created next to the content database. */
+  campaignsDatabaseId: string;
+  ideasDatabaseId: string;
   /** Validation of the database as Notion returned it; should be ok with no errors. */
   validation: ReturnType<typeof validateNotionDatabase>;
 }
@@ -43,11 +46,15 @@ export async function createNotionTemplate(
     input.token,
     input.fetchImpl ? { fetchImpl: input.fetchImpl } : {},
   );
-  const created = await client.createDatabase(
-    templateCreateBody(parentId, input.title ?? TEMPLATE_TITLE),
-  );
-  const db = await client.retrieveDatabase(created.id);
-  return { databaseId: created.id, url: created.url, validation: validateNotionDatabase(db) };
+  const suite = await createTemplateSuite(client, parentId, input.title ?? TEMPLATE_TITLE);
+  const db = await client.retrieveDatabase(suite.contentDatabaseId);
+  return {
+    databaseId: suite.contentDatabaseId,
+    url: suite.contentUrl,
+    campaignsDatabaseId: suite.campaignsDatabaseId,
+    ideasDatabaseId: suite.ideasDatabaseId,
+    validation: validateNotionDatabase(db),
+  };
 }
 
 /** Page URLs look like /Title-<32hex>; accepts raw ids too. */
@@ -83,6 +90,8 @@ async function main(): Promise<void> {
     console.log(`Created "${values.title ?? TEMPLATE_TITLE}"`);
     console.log(`  database id: ${result.databaseId}`);
     console.log(`  url:         ${result.url}`);
+    console.log(`  campaigns:   ${result.campaignsDatabaseId}`);
+    console.log(`  ideas:       ${result.ideasDatabaseId}`);
     if (result.validation.ok) console.log('  validation:  ok');
     else {
       console.log('  validation:  FAILED');

@@ -31,6 +31,12 @@ export interface CanonicalContent {
    * media and everything else stay shared. Blank lines separate paragraphs.
    */
   platformText?: Record<string, string>;
+  /**
+   * Phase 4: text posted as the first comment right after a successful
+   * publish, on providers that declare the `firstComment` capability. Plain
+   * text; never part of the post body.
+   */
+  firstComment?: string;
   meta: { source: 'notion' | 'native'; sourcePageId?: string };
 }
 

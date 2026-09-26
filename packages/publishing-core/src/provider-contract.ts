@@ -175,6 +175,22 @@ export function runProviderContractSuite(name: string, make: () => PublishingPro
       }
     });
 
+    it('comment, when declared, resolves to posted or failed and never throws', async () => {
+      const p = make();
+      if (!p.capabilities().firstComment) {
+        expect(typeof p.comment).toBe('undefined');
+        return;
+      }
+      expect(typeof p.comment).toBe('function');
+      const result = await p.comment!(
+        { publicationId: 'pub-1', account, providerPostId: 'post-id-1', text: 'first comment' },
+        ctx,
+      );
+      expect(['posted', 'failed']).toContain(result.kind);
+      if (result.kind === 'posted') expect(result.commentId.length).toBeGreaterThan(0);
+      else expect(typeof result.retryable).toBe('boolean');
+    });
+
     it('rejects more images than supported', () => {
       const p = make();
       const caps = p.capabilities();
