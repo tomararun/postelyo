@@ -45,6 +45,10 @@ const envSchema = z.object({
   STRIPE_PRICE_SOLO: z.string().min(1).optional(),
   STRIPE_PRICE_TEAM: z.string().min(1).optional(),
   STRIPE_PRICE_AGENCY: z.string().min(1).optional(),
+  /** Phase 6 AI assistance: Anthropic by default; `fake` never calls a provider. */
+  ANTHROPIC_API_KEY: z.string().min(1).optional(),
+  AI_PROVIDER: z.enum(['anthropic', 'fake']).optional(),
+  AI_MODEL: z.string().min(1).optional(),
   /** Media object storage (Phase 2): `local` serves files from the api; `s3` for R2/MinIO/AWS. */
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('.data/media'),

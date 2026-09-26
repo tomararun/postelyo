@@ -109,6 +109,9 @@ export interface FakeNotionPageInput {
   repeatUntil?: string | null;
   repeatOf?: string[];
   firstComment?: string;
+  /** Phase 6 */
+  generateVariants?: boolean;
+  repurpose?: string | null;
   /** Phase 4: free-form property values for companion pages (campaigns, ideas). */
   extra?: Record<string, unknown>;
 }
@@ -127,6 +130,8 @@ interface FakeNotionPage extends Required<
     | 'repeatUntil'
     | 'repeatOf'
     | 'firstComment'
+    | 'generateVariants'
+    | 'repurpose'
     | 'extra'
   >
 > {
@@ -142,6 +147,8 @@ interface FakeNotionPage extends Required<
   repeatUntil: string | null;
   repeatOf: string[];
   firstComment: string;
+  generateVariants: boolean;
+  repurpose: string | null;
   extra: Record<string, unknown>;
   /** Block ids deleted through the API; indexes stay stable. */
   deletedBlocks: Set<number>;
@@ -226,6 +233,8 @@ export class FakeNotion {
         input.repeatUntil !== undefined ? input.repeatUntil : (prev?.repeatUntil ?? null),
       repeatOf: input.repeatOf ?? prev?.repeatOf ?? [],
       firstComment: input.firstComment ?? prev?.firstComment ?? '',
+      generateVariants: input.generateVariants ?? prev?.generateVariants ?? false,
+      repurpose: input.repurpose !== undefined ? input.repurpose : (prev?.repurpose ?? null),
       extra: { ...(prev?.extra ?? {}), ...(input.extra ?? {}) },
       deletedBlocks: input.body !== undefined ? new Set() : (prev?.deletedBlocks ?? new Set()),
       lastEditedTime: this.tick(),
@@ -362,6 +371,8 @@ export class FakeNotion {
         'Repeat Until': { type: 'date', date: p.repeatUntil ? { start: p.repeatUntil } : null },
         'Repeat Of': { type: 'relation', relation: p.repeatOf.map((id) => ({ id })) },
         'First Comment': { type: 'rich_text', rich_text: rt(p.firstComment) },
+        'Generate variants': { type: 'checkbox', checkbox: p.generateVariants },
+        Repurpose: { type: 'select', select: p.repurpose ? { name: p.repurpose } : null },
         Approval: {
           type: 'select',
           select: p.system.approval ? { name: p.system.approval } : null,
@@ -535,6 +546,7 @@ export class FakeNotion {
         plainOf((c[String(c['type'])] as Record<string, unknown>)?.['rich_text']),
       );
       const page = this.upsert(id, input);
+      this.applySystemProperties(page, parsed.properties ?? {});
       this.createdPages.push(id);
       return json(200, this.toApiPage(page));
     }
@@ -560,6 +572,9 @@ export class FakeNotion {
       return json(200, { object: 'list', results: [] });
     }
 
+    const blocks = this.handleBlocks(path, method);
+    if (blocks) return blocks;
+
     const pageMatch = path.match(/^\/pages\/([0-9a-zA-Z-]+)$/);
     if (pageMatch) {
       const p = this.pages.get(pageMatch[1]!);
@@ -581,10 +596,30 @@ export class FakeNotion {
         this.patches.push({ pageId: p.id, properties: props });
         const generic: FakeNotionPageInput = {};
         this.applyProperties(generic, props);
+        if (generic.platformText) {
+          generic.platformText = { ...p.platformText, ...generic.platformText };
+        }
+        if (generic.extra) generic.extra = { ...p.extra, ...generic.extra };
         Object.assign(
           p,
           Object.fromEntries(Object.entries(generic).filter(([, v]) => v !== undefined)),
         );
+        this.applySystemProperties(p, props);
+        p.lastEditedTime = this.tick();
+        return json(200, this.toApiPage(p));
+      }
+    }
+
+    return null;
+  }
+
+  /** System-owned columns written by Postelyo (writeback, AI notes), on create and patch. */
+  private applySystemProperties(
+    p: FakeNotionPage,
+    props: Record<string, Record<string, unknown>>,
+  ): void {
+    {
+      {
         for (const [name, value] of Object.entries(props)) {
           const plain = (v: unknown) =>
             Array.isArray(v)
@@ -617,11 +652,11 @@ export class FakeNotion {
               break;
           }
         }
-        p.lastEditedTime = this.tick();
-        return json(200, this.toApiPage(p));
       }
     }
+  }
 
+  private handleBlocks(path: string, method: string): Response | null {
     const children = path.match(/^\/blocks\/([0-9a-zA-Z-]+)\/children$/);
     if (children && method === 'GET') {
       const p = this.pages.get(children[1]!);
@@ -695,6 +730,12 @@ export class FakeNotion {
           break;
         case 'Time Zone':
           input.timeZone = name(value['select']) ?? plainOf(value['rich_text']) ?? null;
+          break;
+        case 'Generate variants':
+          input.generateVariants = value['checkbox'] === true;
+          break;
+        case 'Repurpose':
+          input.repurpose = name(value['select']);
           break;
         case 'First Comment':
           input.firstComment = plainOf(value['rich_text']);

@@ -19,6 +19,7 @@ import { writebackPatch } from './notion-writeback.js';
 import type { CampaignService } from '../../campaigns/campaign.service.js';
 import type { IdeaService } from '../../posts/idea.service.js';
 import type { SeriesService } from '../../posts/series.service.js';
+import type { AiCompanionService, AiTrigger } from '../../ai/ai-companion.service.js';
 
 export interface SyncSummary {
   sourceId: string;
@@ -38,6 +39,9 @@ export interface SyncSummary {
     ideasSeen: number;
     promoted: number;
     warnings: string[];
+    /** Phase 6 */
+    aiVariants: number;
+    aiRepurposed: number;
   };
 }
 
@@ -56,6 +60,8 @@ export interface NotionSyncDeps {
   campaigns?: CampaignService;
   series?: SeriesService;
   ideas?: IdeaService;
+  /** Phase 6 */
+  aiCompanion?: AiCompanionService;
 }
 
 function emptySummary(sourceId: string, workspaceId: string): SyncSummary {
@@ -219,6 +225,7 @@ export class NotionSyncService {
 
         let maxEdited = cursor.lastEditedAfter ?? null;
         const seen = new Set<string>();
+        const aiTriggers: AiTrigger[] = [];
         let next: string | null = null;
         do {
           const list = await client.queryDatabase(source.externalDatabaseId!, {
@@ -230,13 +237,23 @@ export class NotionSyncService {
             seen.add(page.id);
             if (page.lastEditedTime && (!maxEdited || page.lastEditedTime > maxEdited))
               maxEdited = page.lastEditedTime;
-            await this.processPage(ctx, source, ws, accounts, map, client, page, summary);
+            await this.processPage(
+              ctx,
+              source,
+              ws,
+              accounts,
+              map,
+              client,
+              page,
+              summary,
+              aiTriggers,
+            );
           }
           next = list.hasMore ? list.nextCursor : null;
         } while (next && summary.pagesSeen < MAX_PAGES_PER_RUN);
 
         await this.verifyScheduledPages(ctx, source, ws, accounts, map, client, seen, summary);
-        summary.extras = await this.runCompanions(ctx, source, ws, map, client);
+        summary.extras = await this.runCompanions(ctx, source, ws, map, client, aiTriggers);
 
         // Companion services keep their own cursor keys; merge rather than replace.
         const [fresh] = await this.deps.db
@@ -304,6 +321,7 @@ export class NotionSyncService {
     ws: typeof workspace.$inferSelect,
     map: PropertyMap,
     client: NotionClient,
+    aiTriggers: AiTrigger[] = [],
   ): Promise<NonNullable<SyncSummary['extras']>> {
     const extras: NonNullable<SyncSummary['extras']> = {
       campaignsSeen: 0,
@@ -314,7 +332,15 @@ export class NotionSyncService {
       ideasSeen: 0,
       promoted: 0,
       warnings: [],
+      aiVariants: 0,
+      aiRepurposed: 0,
     };
+    if (this.deps.aiCompanion && aiTriggers.length > 0) {
+      const r = await this.deps.aiCompanion.run(ctx, source, ws, map, client, aiTriggers);
+      extras.aiVariants = r.variants;
+      extras.aiRepurposed = r.repurposed;
+      extras.warnings.push(...r.warnings);
+    }
     if (this.deps.campaigns) {
       try {
         const r = await this.deps.campaigns.syncFromNotion(ctx, source, client);
@@ -356,8 +382,12 @@ export class NotionSyncService {
     client: NotionClient,
     page: NotionPage,
     summary: SyncSummary,
+    aiTriggers: AiTrigger[] = [],
   ): Promise<void> {
     const mapped = mapPage(page, map);
+    if (!page.archived && (mapped.generateVariants || mapped.repurpose)) {
+      aiTriggers.push({ page: mapped, pageId: page.id });
+    }
     try {
       const result = await this.deps.ingest.ingest({
         ctx,

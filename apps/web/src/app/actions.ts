@@ -113,6 +113,34 @@ export async function updateWorkspace(workspaceId: string, formData: FormData): 
   redirect(back(path, { notice: 'Settings saved.' }));
 }
 
+export async function updateAiSettings(workspaceId: string, formData: FormData): Promise<void> {
+  const path = `/w/${workspaceId}/ai`;
+  const budget = field(formData, 'monthlyTokenBudget').trim();
+  const model = field(formData, 'model').trim();
+  const voice = field(formData, 'voice').trim();
+  const banned = field(formData, 'bannedPhrases')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  try {
+    await api(`/v1/workspaces/${workspaceId}`, {
+      method: 'PATCH',
+      body: {
+        ai: {
+          enabled: formData.get('enabled') === 'on',
+          ...(voice ? { voice } : {}),
+          ...(model ? { model } : {}),
+          bannedPhrases: banned,
+          ...(budget ? { monthlyTokenBudget: Number(budget) } : {}),
+        },
+      },
+    });
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(back(path, { notice: 'AI settings saved.' }));
+}
+
 export async function setWeeklyReport(workspaceId: string, formData: FormData): Promise<void> {
   const path = `/w/${workspaceId}/settings`;
   try {

@@ -51,5 +51,6 @@ export const RLS_TABLES = [
   'approval',
   'short_link',
   'publication_metric',
+  'ai_generation',
   'audit_log',
 ] as const;

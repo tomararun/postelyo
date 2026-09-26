@@ -1,6 +1,7 @@
 import { eq } from 'drizzle-orm';
 import type { Db } from '../../infra/db/client.js';
-import { contentSource, type ContentSource } from '../../infra/db/schema.js';
+import { contentSource, post, type ContentSource } from '../../infra/db/schema.js';
+import { uuidv7 } from '../../shared/ids.js';
 import type { Logger } from '../../infra/logger.js';
 import type { Clock } from '../../shared/clock.js';
 import { recordAudit } from '../audit/audit.js';
@@ -18,6 +19,9 @@ import {
 } from '../content-sources/notion/notion-mapper.js';
 import { richText } from '../content-sources/notion/notion-writeback.js';
 import type { TenantContext } from '../tenancy/tenant-context.js';
+import { workspace } from '../../infra/db/schema.js';
+import type { AiService } from '../ai/ai.service.js';
+import { draftPrompt, draftSystem } from '../ai/prompts.js';
 
 /**
  * Phase 4 ideas: pages of the Ideas database whose `Status` is `Promote`
@@ -40,6 +44,8 @@ export interface IdeaServiceDeps {
   db: Db;
   clock: Clock;
   logger: Logger;
+  /** Phase 6: `Status = Draft with AI` writes the draft body. */
+  ai?: AiService;
 }
 
 export class IdeaService {
@@ -76,8 +82,9 @@ export class IdeaService {
         const prop = (name: string) => page.properties[propName(map, name)] ?? {};
         const statusProp = prop('Status');
         const status = asRecord(statusProp['select'] ?? statusProp['status']);
-        if (typeof status['name'] !== 'string' || status['name'].toLowerCase() !== 'promote')
-          continue;
+        const statusName = typeof status['name'] === 'string' ? status['name'].toLowerCase() : '';
+        const withAi = statusName === 'draft with ai';
+        if (statusName !== 'promote' && !withAi) continue;
         try {
           contentSchema ??= await client.retrieveDatabase(source.externalDatabaseId);
           ideasSchema ??= await client.retrieveDatabase(dbId);
@@ -90,6 +97,7 @@ export class IdeaService {
             contentSchema,
             ideasSchema,
             client,
+            withAi,
           );
           promoted += 1;
           this.deps.logger.info({ ideaId: page.id, url }, 'idea promoted');
@@ -123,6 +131,7 @@ export class IdeaService {
     contentSchema: NotionDatabase,
     ideasSchema: NotionDatabase,
     client: NotionClient,
+    withAi = false,
   ): Promise<string> {
     const prop = (name: string) => idea.properties[propName(map, name)] ?? {};
     const titleProp =
@@ -135,13 +144,56 @@ export class IdeaService {
           .map((o) => asRecord(o)['name'])
           .filter((n): n is string => typeof n === 'string')
       : [];
-    const body = blocksForWrite(await client.retrieveBlockChildren(idea.id));
-    const children = [
+    const ideaBlocks = await client.retrieveBlockChildren(idea.id);
+    const body = blocksForWrite(ideaBlocks);
+    let children: unknown[] = [
       ...(notes.length > 0
         ? [{ object: 'block', type: 'paragraph', paragraph: { rich_text: richText(notes) } }]
         : []),
       ...body,
     ];
+    let aiNote = '';
+    if (withAi) {
+      // Phase 6: the AI writes the draft body from the idea; the idea text stays below it for reference.
+      const [ws] = await this.deps.db
+        .select()
+        .from(workspace)
+        .where(eq(workspace.id, ctx.workspaceId))
+        .limit(1);
+      if (!this.deps.ai || !ws) throw new Error('AI assistance is not available');
+      const ideaText = ideaBlocks
+        .map((b) => richTextToPlain(b.value['rich_text']))
+        .filter((t) => t.length > 0)
+        .join('\n\n');
+      const { text } = await this.deps.ai.generate(ctx, ws, {
+        purpose: 'draft_from_idea',
+        system: draftSystem(),
+        prompt: draftPrompt({ title, notes, body: ideaText, platforms }),
+        effort: 'medium',
+        maxTokens: 3000,
+        entityType: 'idea',
+        entityId: idea.id,
+      });
+      const paragraphs = text
+        .split(/\n{2,}/)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
+      children = [
+        ...paragraphs.map((p) => ({
+          object: 'block',
+          type: 'paragraph',
+          paragraph: { rich_text: richText(p) },
+        })),
+        { object: 'block', type: 'divider', divider: {} },
+        {
+          object: 'block',
+          type: 'paragraph',
+          paragraph: { rich_text: richText('Original idea notes:') },
+        },
+        ...children,
+      ];
+      aiNote = 'Postelyo AI: draft written from the idea; review before scheduling.';
+    }
     const statusType = (schema: NotionDatabase, name: string) =>
       Object.values(schema.properties).find((p) => p.name.toLowerCase() === name.toLowerCase())
         ?.type;
@@ -166,9 +218,28 @@ export class IdeaService {
               },
             }
           : {}),
+        ...(aiNote
+          ? { [propName(contentMap, 'Postelyo Note')]: { rich_text: richText(aiNote) } }
+          : {}),
       },
       ...(children.length > 0 ? { children } : {}),
     });
+    if (withAi) {
+      await this.deps.db
+        .insert(post)
+        .values({
+          id: uuidv7(),
+          workspaceId: ctx.workspaceId,
+          contentSourceId: source.id,
+          externalId: created.id,
+          externalUrl: created.url || null,
+          title,
+          state: 'draft',
+          sourceStatus: 'Draft',
+          aiAssisted: true,
+        })
+        .onConflictDoNothing();
+    }
     const patch: Record<string, unknown> = {
       [propName(map, 'Status')]: statusValue(ideasSchema, propName(map, 'Status'), 'Promoted'),
     };
@@ -181,7 +252,7 @@ export class IdeaService {
       entityId: source.id,
       event: 'idea.promoted',
       correlationId: ctx.correlationId,
-      data: { ideaPageId: idea.id, postPageId: created.id, title },
+      data: { ideaPageId: idea.id, postPageId: created.id, title, withAi },
     });
     return created.url;
   }

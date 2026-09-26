@@ -26,6 +26,12 @@ import { AnalyticsQueryService } from './modules/analytics/analytics-query.servi
 import { AnalyticsWritebackService } from './modules/analytics/analytics-writeback.service.js';
 import { PostMetricsService } from './modules/analytics/metrics.service.js';
 import { WeeklyReportService } from './modules/analytics/weekly-report.service.js';
+import { AiService } from './modules/ai/ai.service.js';
+import { AiCompanionService } from './modules/ai/ai-companion.service.js';
+import { AnthropicProvider, FakeAiProvider, type AiProvider } from './modules/ai/provider.js';
+import { altTextPrompt, altTextSystem } from './modules/ai/prompts.js';
+import { mediaAsset } from './infra/db/schema.js';
+import { eq } from 'drizzle-orm';
 import { PostQueryService } from './modules/posts/post-query.service.js';
 import { PublishEngine } from './modules/publishing/engine.js';
 import type { JobEnqueuer } from './modules/publishing/jobs.js';
@@ -77,11 +83,16 @@ export interface ServiceDeps {
     | 'STRIPE_PRICE_SOLO'
     | 'STRIPE_PRICE_TEAM'
     | 'STRIPE_PRICE_AGENCY'
+    | 'ANTHROPIC_API_KEY'
+    | 'AI_PROVIDER'
+    | 'AI_MODEL'
   >;
   /** Overrides the storage built from env (tests). */
   storage?: ObjectStorage | undefined;
   /** Overrides the Stripe gateway (tests use the fake; PROVIDER_MODE=fake without keys does too). */
   billingGateway?: BillingGateway | undefined;
+  /** Phase 6: injected AI provider (tests use the fake). */
+  aiProvider?: AiProvider | undefined;
   db: Db;
   logger: Logger;
   keyProvider: KeyProvider;
@@ -133,6 +144,10 @@ export interface Services {
   analytics: AnalyticsQueryService;
   analyticsWriteback: AnalyticsWritebackService;
   weeklyReport: WeeklyReportService;
+  /** Phase 6 */
+  ai: AiService;
+  aiCompanion: AiCompanionService;
+  aiProvider: AiProvider | null;
 }
 
 /** One composition root shared by the api and worker roles (architecture §2.1). */
@@ -211,7 +226,27 @@ export function buildServices(deps: ServiceDeps): Services {
   const links = new LinkService({ db: deps.db, clock, appBaseUrl: deps.env.APP_BASE_URL });
   const campaigns = new CampaignService({ db: deps.db, clock, logger: deps.logger });
   const series = new SeriesService({ db: deps.db, clock, logger: deps.logger });
-  const ideas = new IdeaService({ db: deps.db, clock, logger: deps.logger });
+  // Phase 6 AI: Anthropic when a key is present, the fake in fake provider mode, otherwise off.
+  const aiProvider: AiProvider | null =
+    deps.aiProvider ??
+    (deps.env.AI_PROVIDER === 'fake'
+      ? new FakeAiProvider({ ...(deps.env.AI_MODEL ? { model: deps.env.AI_MODEL } : {}) })
+      : deps.env.ANTHROPIC_API_KEY
+        ? new AnthropicProvider({
+            apiKey: deps.env.ANTHROPIC_API_KEY,
+            ...(deps.env.AI_MODEL ? { model: deps.env.AI_MODEL } : {}),
+          })
+        : deps.env.PROVIDER_MODE === 'fake'
+          ? new FakeAiProvider()
+          : null);
+  const ai = new AiService({
+    db: deps.db,
+    provider: aiProvider,
+    billing,
+    clock,
+    logger: deps.logger,
+  });
+  const ideas = new IdeaService({ db: deps.db, clock, logger: deps.logger, ai });
   const approvals = new ApprovalService({ db: deps.db, clock, enqueue: deps.enqueue });
   const ingest = new PostIngestService({
     db: deps.db,
@@ -221,12 +256,51 @@ export function buildServices(deps: ServiceDeps): Services {
     logger: deps.logger,
     campaigns,
     approvals,
+    altText: async (ctx, ws, asset, postTitle) => {
+      if (!(await ai.available(ctx.workspaceId, ws))) return;
+      const loaded = await media.load(ctx, asset, null);
+      const mime = loaded.mimeType;
+      if (
+        mime !== 'image/jpeg' &&
+        mime !== 'image/png' &&
+        mime !== 'image/webp' &&
+        mime !== 'image/gif'
+      )
+        return;
+      const { text } = await ai.generate(
+        ctx,
+        { id: ws.id, settings: ws.settings },
+        {
+          purpose: 'alt_text',
+          system: altTextSystem(),
+          prompt: altTextPrompt({ postTitle, fileName: asset.name }),
+          image: { mimeType: mime, base64: Buffer.from(loaded.bytes).toString('base64') },
+          effort: 'low',
+          maxTokens: 200,
+          entityType: 'media_asset',
+          entityId: asset.id,
+        },
+      );
+      const alt = text.trim().slice(0, 300);
+      if (alt.length > 0) {
+        await deps.db.update(mediaAsset).set({ altText: alt }).where(eq(mediaAsset.id, asset.id));
+      }
+    },
     postLimit: async (workspaceId) => {
       const r = await billing.postLimitReached(workspaceId);
       return r.reached
         ? `The ${r.plan} plan allows ${r.limit} published posts per month and ${r.used} were already published. Upgrade the plan on the Billing page to schedule more this month.`
         : null;
     },
+  });
+  const aiCompanion = new AiCompanionService({
+    db: deps.db,
+    ai,
+    contentSources,
+    analytics: new AnalyticsQueryService({ db: deps.db, clock }),
+    clock,
+    logger: deps.logger,
+    ...fetchOpt,
   });
   const notionSync = new NotionSyncService({
     db: deps.db,
@@ -237,6 +311,7 @@ export function buildServices(deps: ServiceDeps): Services {
     campaigns,
     series,
     ideas,
+    aiCompanion,
     ...fetchOpt,
   });
   const scheduler = new SchedulerService({
@@ -402,5 +477,8 @@ export function buildServices(deps: ServiceDeps): Services {
     analytics,
     analyticsWriteback,
     weeklyReport,
+    ai,
+    aiCompanion,
+    aiProvider,
   };
 }

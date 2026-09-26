@@ -63,7 +63,9 @@ export type AuditEvent =
   | 'metrics.fetched'
   | 'metrics.stopped'
   | 'analytics.rollup_written'
-  | 'report.weekly_sent';
+  | 'report.weekly_sent'
+  | 'ai.generated'
+  | 'ai.assisted';
 
 export type AuditEntityType =
   | 'workspace'
@@ -78,7 +80,8 @@ export type AuditEntityType =
   | 'alert'
   | 'worker'
   | 'campaign'
-  | 'approval';
+  | 'approval'
+  | 'ai_generation';
 
 export interface AuditEntry {
   workspaceId: string | null;

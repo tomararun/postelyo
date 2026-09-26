@@ -262,7 +262,9 @@ Document every provider metric field and its refresh limits.
 
 ---
 
-## Phase 6 – AI assistance
+## Phase 6 – AI assistance (built 2026-09-26)
+
+**Status.** Built and tested against the fake provider: AI service with Claude by default, plan-based token budgets with cost accounting and a full generation log, Notion-triggered platform variants that never overwrite human text, repurposing into linked drafts, drafts from ideas, alt text, analytics-informed suggestions, and enforcement (nothing is scheduled by the AI; approvals apply). Deferred: image generation, translation, A/B testing. Details in [roadmap.md](./roadmap.md) Phase 6 and architecture §7.6.
 
 **Goal.** AI does the tedious adaptation and drafting inside the Notion workflow; humans keep control.
 

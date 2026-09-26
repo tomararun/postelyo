@@ -8,6 +8,7 @@ import type { Role, TenantContext } from '../tenancy/tenant-context.js';
 import {
   MAX_DAILY_CAP_PER_ACCOUNT,
   readSettings,
+  type AiSettings,
   type ApprovalSettings,
   type EvergreenSettings,
   type FlaggedProvider,
@@ -47,6 +48,8 @@ export interface WorkspacePatch {
   links?: LinkSettings | null | undefined;
   evergreen?: EvergreenSettings | null | undefined;
   approval?: ApprovalSettings | null | undefined;
+  /** Phase 6 */
+  ai?: AiSettings | null | undefined;
 }
 
 const DEFAULT_TIMEZONE = 'UTC';
@@ -250,7 +253,8 @@ export class WorkspaceService {
         patch.alertCopyEmail !== undefined ||
         patch.links !== undefined ||
         patch.evergreen !== undefined ||
-        patch.approval !== undefined
+        patch.approval !== undefined ||
+        patch.ai !== undefined
       ) {
         // Unknown keys are kept; known keys are replaced or removed explicitly.
         const merged: Record<string, unknown> = { ...(before.settings as Record<string, unknown>) };
@@ -276,7 +280,7 @@ export class WorkspaceService {
             delete merged[k];
           } else if (v !== undefined) settings[k] = v;
         }
-        for (const k of ['links', 'evergreen', 'approval'] as const) {
+        for (const k of ['links', 'evergreen', 'approval', 'ai'] as const) {
           const v = patch[k];
           if (v === null) {
             delete settings[k];

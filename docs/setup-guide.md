@@ -80,6 +80,17 @@ Owners and admins set the time zone, default publish time, daily cap, which plat
 - **Approvals**: when your admin turns the policy on, a Ready post shows `Awaiting approval` until a reviewer approves it in Postelyo → Posts. Any edit afterwards needs a new approval. Scheduling without one shows a validation error.
 - **Ideas**: jot ideas in *Postelyo Ideas*; set `Status = Promote` and a Draft appears in the content database with a link back.
 
+## AI help (optional)
+
+When your admin switches on AI assistance (Postelyo → AI) and your plan includes it:
+
+- Tick **Generate variants** on a page: the empty platform text fields (`LinkedIn Text`, `X Text`, …) get a suggested version in your brand voice. Fields you wrote yourself are left alone. The note tells you what was suggested; edit freely.
+- Pick **Repurpose** (`Thread`, `Short variants`, `Carousel outline`): new Draft pages appear, linked to the source.
+- Set an idea to **Draft with AI**: a Draft page with a written body appears, your notes kept underneath.
+- Images without a description get alt text automatically.
+
+The AI never schedules or publishes anything. You still set `Status = Scheduled`, and if your workspace requires approvals, they apply as usual. Your admin sees usage, cost and every generation on the AI page.
+
 ## Results (analytics)
 
 About an hour after a post goes live its page in Notion fills `Impressions`, `Reach`, `Reactions`, `Comments`, `Shares` and `Clicks` (where the platform reports them), refreshed at 6 hours, 24 hours, 7 days and 30 days. The *Postelyo Analytics* database holds one row per week and platform plus the best times to publish. In Postelyo, **Analytics** shows the weekly trend, top posts, hashtags and best-time suggestions. Owners and admins get a Monday morning email with last week's numbers; switch it off in Settings.

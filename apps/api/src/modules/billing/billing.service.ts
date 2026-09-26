@@ -67,7 +67,13 @@ export interface BillingDeps {
 export interface UsageSummary {
   plan: PlanId;
   planName: string;
-  limits: { accounts: number; postsPerMonth: number; members: number | null };
+  limits: {
+    accounts: number;
+    postsPerMonth: number;
+    members: number | null;
+    /** Phase 6 */
+    aiTokensPerMonth: number;
+  };
   used: { accounts: number; postsThisMonth: number; members: number };
   subscription: {
     status: string;
@@ -211,6 +217,7 @@ export class BillingService {
         accounts: limits.accounts,
         postsPerMonth: limits.postsPerMonth,
         members: Number.isFinite(limits.members) ? limits.members : null,
+        aiTokensPerMonth: limits.aiTokensPerMonth,
       },
       used: {
         accounts: await this.activeAccounts(ctx.workspaceId),

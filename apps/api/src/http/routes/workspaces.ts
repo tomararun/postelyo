@@ -57,6 +57,17 @@ const patchSchema = z
       .strict()
       .nullable()
       .optional(),
+    ai: z
+      .object({
+        enabled: z.boolean(),
+        model: z.string().max(60).optional(),
+        voice: z.string().max(4000).optional(),
+        bannedPhrases: z.array(z.string().max(100)).max(100).optional(),
+        monthlyTokenBudget: z.number().int().min(0).optional(),
+      })
+      .strict()
+      .nullable()
+      .optional(),
   })
   .strict();
 
@@ -101,6 +112,7 @@ export function workspaceDto(w: Workspace) {
     links: settings.links ?? null,
     evergreen: settings.evergreen ?? null,
     approval: settings.approval ?? null,
+    ai: settings.ai ?? { enabled: false },
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
   };

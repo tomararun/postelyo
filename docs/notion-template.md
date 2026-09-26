@@ -31,6 +31,8 @@ It creates **Postelyo Content**, **Postelyo Campaigns** and **Postelyo Ideas** u
 | `Repeat Of` | relation → this database | Postelyo (v2) | Set on generated instances, pointing at the source page. Do not edit. |
 | `Approval` | select | Postelyo (v2) | `Awaiting approval`, `Approved`, `Changes since approval`; written only when the workspace enforces approvals. Do not edit. |
 | `Link Report` | rich text | Postelyo (v2) | Tracked links (`short → target (clicks)`) when the workspace shortens links. Do not edit. |
+| `Generate variants` | checkbox | you, optional (Phase 6) | Tick to have the AI fill the empty per-platform text fields for the page's platforms. Your own text is never replaced. Postelyo unticks it and explains in the note. Needs AI assistance on and a plan with AI tokens. |
+| `Repurpose` | select | you, optional (Phase 6) | `Thread`, `Short variants`, `Carousel outline`: the AI creates linked Draft pages (`Repeat Of` → this page). Cleared afterwards. |
 | `Postelyo Status` | select | Postelyo | `Awaiting schedule`, `Awaiting approval`, `In evergreen pool`, `Validation error`, `Scheduled`, `Publishing`, `Published`, `Published late`, `Partially failed`, `Failed`, `Needs review`, `Needs re-authorization`. With several platforms the status summarises all of them. Do not edit. |
 | `Postelyo Note` | rich text | Postelyo | Reason or warning in plain language; one line per platform when a page targets several. Do not edit. |
 | `Published URL` | url | Postelyo | Link to the live post (the first one when there are several). |
@@ -58,7 +60,7 @@ Postelyo finds the campaigns database through the `Campaign` relation of the con
 | Property | Type | Owner | Notes |
 |----------|------|-------|-------|
 | `Name` | title | you | Becomes the post title. |
-| `Status` | select or status | you | `New`, `Promote`, `Promoted`. Set **Promote** to turn the idea into a `Draft` page in the content database; Postelyo then sets `Promoted`. |
+| `Status` | select or status | you | `New`, `Promote`, `Draft with AI`, `Promoted`. **Promote** copies the idea into a `Draft` page; **Draft with AI** (Phase 6) has the AI write the draft body in the workspace voice, with the original notes kept below. Postelyo then sets `Promoted`. |
 | `Notes` | rich text | you | Copied as the first paragraph of the draft, followed by the idea's page body. |
 | `Platforms` | multi-select | you, optional | Copied to the draft. |
 | `Post URL` | url | Postelyo | Link to the created draft. |

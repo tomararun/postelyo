@@ -354,6 +354,15 @@ Everything below is additive to the contract (docs/notion-template.md v2) and ru
 - **Weekly report.** Maintenance sends it once per workspace and ISO week on Monday from 08:00 workspace time to owners and admins whose membership has `weekly_report` on (opt-out per person via `PATCH …/members/me`). It compares last week with the week before, lists the top three posts and the best-time suggestion, and links to the dashboard. The marker is `workspace.settings.weeklyReportLastWeek`.
 - **Dashboard.** `/w/{id}/analytics`: a hand-written SVG weekly line chart (one axis, fixed platform colours validated with the dataviz palette checks, direct labels, table view for the low-contrast slots), top posts, hashtags and best times; range and metric are URL filters. Publication detail shows the per-tier history.
 
+### 7.6 AI assistance (Phase 6)
+
+- **Provider abstraction.** `AiProvider` with `AnthropicProvider` (official TypeScript SDK, default model `claude-opus-5`, adaptive thinking, medium effort, the voice document as a cached system prefix, typed error mapping, `refusal` stop reason surfaced as a provider error) and `FakeAiProvider` (deterministic, records calls; used by tests and `AI_PROVIDER=fake`). `AI_MODEL` and a per-workspace model override change the model without code changes.
+- **Gate and budget.** `AiService` is the only path to a provider. It checks the server configuration, the workspace switch (`settings.ai.enabled`), the plan entitlement (`PlanLimits.aiTokensPerMonth`: Free 0, Solo 200k, Team 1M, Agency 5M placeholders; a workspace may set a lower cap), and the month's spend from `ai_generation`, then calls the provider, applies the banned-phrase guardrail (offending output is discarded), and writes one `ai_generation` row per request with prompt text, tokens, cost (pricing table in `provider.ts`), duration and outcome (`ok`, `guardrail`, `error`). Every row also gets an `ai.generated` audit entry. Credentials never enter prompts or rows.
+- **Notion triggers.** The sync collects pages with `Generate variants` ticked or a `Repurpose` option set and hands them to `AiCompanionService` after the page loop. Variants: only platforms the page targets and only empty per-platform fields are filled; human text is never overwritten; each field is clipped to the platform limit; the note gets a `Postelyo AI` line (plus hashtag and best-time suggestions from Phase 5 data when history exists) and the checkbox is reset. Repurpose: `Thread` and `Carousel outline` become one Draft page holding the sequence, `Short variants` become one Draft page each, all linked to the source through `Repeat Of`; the select is cleared. Ideas with `Status = Draft with AI` get a generated body above the original notes. Failures (off, not entitled, budget, guardrail, provider) reset the trigger and explain themselves in the note; the sync itself never fails because of AI.
+- **Alt text.** At media inspection, when AI is available and the asset has no description, a vision request writes `media_asset.alt_text`; rendering uses it in place of the file-name placeholder. Generated once per asset.
+- **Enforcement.** AI never changes `Status`, a date or a publication: content publishes only when a human sets `Scheduled`. Touched posts carry `post.ai_assisted` (dashboard badge) and go through the Phase 4 approval policy like any other post.
+- **Dashboard and API.** `/w/{id}/ai`: status, model, tokens and cost this month, settings and guardrails (switch, voice, banned phrases, cap, model override), recent generations with outcomes. `GET /v1/workspaces/{id}/ai`, `POST …/posts/{postId}/ai/variants` (manual trigger; 402 on budget or entitlement), `PATCH /v1/workspaces/{id} { ai }`.
+
 ## 8. Scheduling architecture
 
 ### 8.1 Time handling
@@ -645,6 +654,13 @@ GET  /v1/workspaces/{id}/analytics?weeks=8                  weekly rollups, top 
 PATCH /v1/workspaces/{id}/members/me { weeklyReport }        own weekly-report preference
 ```
 
+```
+# Phase 6 (AI)
+GET  /v1/workspaces/{id}/ai                                  usage, budget, recent generations
+POST /v1/workspaces/{id}/posts/{postId}/ai/variants          generate missing platform texts now
+PATCH /v1/workspaces/{id} { ai: { enabled, voice, bannedPhrases, monthlyTokenBudget, model } }
+```
+
 `GET /v1/workspaces/{id}/publications/{pid}` also returns the metrics history (`metrics[]` per tier, `metricsNextAt`, `metricsError`), and `GET …/members` includes `weeklyReport`. `GET /v1/workspaces/{id}/publications/{pid}` also returns `firstCommentState`/`firstCommentId`/`firstCommentError` and the publication's tracked `links` with click counts; the setup wizard's `GET …/setup` returns `suggested` databases when a duplicated Postelyo template is found, and `POST …/setup` accepts `ideasDatabaseId` in `existing` mode.
 
 ### 14.3 Internal module boundaries
@@ -855,3 +871,8 @@ Explicitly **not** done in the MVP: microservices, event bus, multi-region, Kube
 | D42 (2026-09-26) | Fields a platform does not expose stay null; nothing is estimated or blended | Fill gaps with proxies | Numbers in Notion must match what the platform shows. |
 | D43 (2026-09-26) | Weekly report goes to owners and admins only, opt-out per membership | All members; opt-in | Matches who acts on the numbers; editors see the dashboard when they want it. |
 | D44 (2026-09-26) | Best-time and hashtag insights need minimum sample sizes and are labelled as suggestions | Show whatever history exists | Thin data produces confident nonsense; the label keeps humans in charge (product roadmap Phase 6 rule). |
+| D45 (2026-09-26) | One `AiService` gate with a provider interface; Claude via the official SDK by default, a fake for tests | Call the SDK from each feature | One place for entitlement, budget, guardrails and audit; provider swaps and model changes are configuration. |
+| D46 (2026-09-26) | AI output goes only into empty per-platform fields and new Draft pages; human text is never overwritten and Status/date are never touched | Overwrite with a diff note; auto-schedule | The author stays the author; nothing publishes without a human setting Scheduled. |
+| D47 (2026-09-26) | Triggers live in Notion (checkbox, select, idea status) and are reset by Postelyo after one run | Dashboard-only triggers | The team works in Notion; a reset trigger makes every request explicit and once. |
+| D48 (2026-09-26) | Token budgets per plan enforced before the call, with a per-workspace lower cap and per-request cost recorded from a pricing table | Meter after the fact from invoices | Cost is visible and capped before money is spent; the table is the one place to update when prices change. |
+| D49 (2026-09-26) | Banned phrases are checked on the output and offending generations are discarded and logged, not edited | Silently strip the phrase | An edited generation could change meaning; the log shows the guardrail working. |

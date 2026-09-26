@@ -1,5 +1,7 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import type { AnalyticsQueryService } from '../../modules/analytics/analytics-query.service.js';
+import { AiError, type AiService } from '../../modules/ai/ai.service.js';
+import type { AiCompanionService } from '../../modules/ai/ai-companion.service.js';
 import type { CampaignService } from '../../modules/campaigns/campaign.service.js';
 import { ApprovalError, type ApprovalService } from '../../modules/posts/approval.service.js';
 import type { PostQueryService } from '../../modules/posts/post-query.service.js';
@@ -15,6 +17,9 @@ export interface PostRoutesOptions {
   campaigns?: CampaignService;
   /** Phase 5 */
   analytics?: AnalyticsQueryService;
+  /** Phase 6 */
+  ai?: AiService;
+  aiCompanion?: AiCompanionService;
 }
 
 function problem(
@@ -52,6 +57,51 @@ export const postRoutes: FastifyPluginAsync<PostRoutesOptions> = async (app, opt
     const ws = await opts.workspaces.get(req.tenant!);
     return opts.analytics.summary(req.tenant!.workspaceId, ws.defaultTimezone, weeks);
   });
+
+  // Phase 6: AI usage, recent generations, and a manual variants trigger.
+  app.get('/v1/workspaces/:workspaceId/ai', { preHandler: viewer }, async (req, reply) => {
+    if (!opts.ai) return problem(reply, req, 404, 'Not Found');
+    const [usage, recent] = await Promise.all([
+      opts.ai.usage(req.tenant!),
+      opts.ai.recent(req.tenant!, 50),
+    ]);
+    return {
+      usage,
+      recent: recent.map((g) => ({
+        id: g.id,
+        purpose: g.purpose,
+        model: g.model,
+        entityType: g.entityType,
+        entityId: g.entityId,
+        totalTokens: g.totalTokens,
+        costUsd: Number(g.costUsd),
+        outcome: g.outcome,
+        error: g.error,
+        durationMs: g.durationMs,
+        createdAt: g.createdAt,
+        outputPreview: g.outputText.slice(0, 200),
+      })),
+    };
+  });
+
+  app.post(
+    '/v1/workspaces/:workspaceId/posts/:postId/ai/variants',
+    { preHandler: requireMembership(opts.workspaces, 'editor') },
+    async (req, reply) => {
+      if (!opts.aiCompanion) return problem(reply, req, 404, 'Not Found');
+      const { postId } = req.params as { postId: string };
+      try {
+        const written = await opts.aiCompanion.variantsForPost(req.tenant!, postId);
+        return { postId, written };
+      } catch (err) {
+        if (err instanceof AiError) {
+          const status = err.code === 'budget' || err.code === 'not_entitled' ? 402 : 409;
+          return problem(reply, req, status, err.message, { code: err.code });
+        }
+        throw err;
+      }
+    },
+  );
 
   app.get('/v1/workspaces/:workspaceId/approvals', { preHandler: viewer }, async (req) => ({
     pending: opts.approvals ? await opts.approvals.pending(req.tenant!) : [],

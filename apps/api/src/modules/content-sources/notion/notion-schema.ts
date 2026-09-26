@@ -63,6 +63,9 @@ export const NOTION_CONTRACT: readonly ContractProperty[] = [
   { name: 'Shares', types: ['number'], required: false, owner: 'system', silent: true },
   { name: 'Clicks', types: ['number'], required: false, owner: 'system', silent: true },
   { name: 'Metrics Updated', types: ['date'], required: false, owner: 'system', silent: true },
+  // Phase 6: AI triggers, reset by Postelyo after each run.
+  { name: 'Generate variants', types: ['checkbox'], required: false, owner: 'user', silent: true },
+  { name: 'Repurpose', types: ['select'], required: false, owner: 'user', silent: true },
   // System-owned select options are created on write, so only the property must exist.
   { name: 'Postelyo Status', types: ['select'], required: true, owner: 'system' },
   { name: 'Postelyo Note', types: ['rich_text'], required: true, owner: 'system' },

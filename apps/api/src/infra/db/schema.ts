@@ -411,6 +411,8 @@ export const post = pgTable(
     repeatUntil: text('repeat_until'),
     /** Phase 4: fingerprint of what a reviewer would approve, refreshed on every sync of a Ready page. */
     approvalFp: text('approval_fp'),
+    /** Phase 6: AI wrote or suggested part of this post; shown in the dashboard, never bypasses approval. */
+    aiAssisted: boolean('ai_assisted').notNull().default(false),
     ...timestamps,
   },
   (t) => [
@@ -625,6 +627,39 @@ export const publicationMetric = pgTable(
 
 export type PublicationMetric = typeof publicationMetric.$inferSelect;
 
+/** Phase 6: every AI request and response (prompt text, tokens, cost, outcome); never credentials. */
+export const aiGeneration = pgTable(
+  'ai_generation',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    purpose: text('purpose').notNull(),
+    provider: text('provider').notNull(),
+    model: text('model').notNull(),
+    entityType: text('entity_type'),
+    entityId: text('entity_id'),
+    promptText: text('prompt_text').notNull(),
+    outputText: text('output_text').notNull().default(''),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    cacheReadTokens: integer('cache_read_tokens').notNull().default(0),
+    totalTokens: integer('total_tokens').notNull().default(0),
+    /** USD, 6 decimals, as text to avoid float drift. */
+    costUsd: text('cost_usd').notNull().default('0'),
+    durationMs: integer('duration_ms').notNull().default(0),
+    /** `ok`, `guardrail` (banned phrase, discarded) or `error`. */
+    outcome: text('outcome').notNull(),
+    error: text('error'),
+    createdByActor: text('created_by_actor').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('ai_generation_workspace_idx').on(t.workspaceId, t.createdAt)],
+);
+
+export type AiGeneration = typeof aiGeneration.$inferSelect;
+
 export const attemptOutcome = pgEnum('attempt_outcome', [
   'succeeded',
   'failed_retryable',
@@ -722,6 +757,8 @@ export const mediaAsset = pgTable(
     /** Sanitized reason when the file could not be used (too large, not an image, unreachable). */
     lastError: text('last_error'),
     inspectedAt: timestamp('inspected_at', { withTimezone: true }),
+    /** Phase 6: generated alternative text, used when the author gave none. */
+    altText: text('alt_text'),
     /** Provider upload references keyed by provider, e.g. { linkedin: { ref: "urn:li:image:…", contentHash } }. */
     providerRefs: jsonb('provider_refs').notNull().default({}),
     ...timestamps,

@@ -79,6 +79,9 @@ describe('pilot tooling', () => {
         'Shares',
         'Clicks',
         'Metrics Updated',
+        // Phase 6 AI triggers
+        'Generate variants',
+        'Repurpose',
       ].sort(),
     );
 

@@ -84,6 +84,8 @@ Per-workspace counts of published, failed, needs-review, accounts needing re-aut
 | Configure evergreen slots | Dashboard → Settings → Evergreen slots, or `PATCH … {"evergreen": {"slots": [{"weekday": 1, "time": "10:00"}], "minGapDays": 30}}` | admin+ |
 | Turn on approval enforcement and pick reviewers | Dashboard → Settings → Approval policy, or `PATCH … {"approval": {"required": true, "reviewers": ["<user id>"]}}` | admin+ |
 | Approve / revoke a post | Dashboard → Posts → Awaiting approval; `POST …/posts/:id/approve`, `DELETE …/posts/:id/approvals` | reviewer or owner / admin |
+| Turn AI assistance on, set the voice and banned phrases | Dashboard → AI, or `PATCH /v1/workspaces/:ws {"ai": {"enabled": true, "voice": "…", "bannedPhrases": ["…"]}}` | admin+ |
+| Generate missing platform texts for a post now | `POST /v1/workspaces/:ws/posts/:id/ai/variants` (or tick *Generate variants* in Notion) | editor+ |
 | Turn the weekly report on or off for yourself | Dashboard → Settings → Weekly report, or `PATCH /v1/workspaces/:ws/members/me {"weeklyReport": false}` | owner or admin |
 | Retry a failed first comment | Maintenance retries `pending` comments up to 3 attempts; a `failed` one is final: post the comment by hand or edit `First Comment` and re-schedule | operator |
 | Delete a workspace | Dashboard → Settings → *Danger zone* (type DELETE), or `DELETE /v1/workspaces/:ws` → 202; purge runs 10 minutes later | owner |
@@ -117,6 +119,13 @@ Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by
 2. Set `NOTION_CLIENT_ID` and `NOTION_CLIENT_SECRET` (both or neither) and redeploy. The Connections page then shows *Connect with Notion*; the pasted-token form stays.
 3. Until Notion approves the integration only workspaces you own can install it; the token path covers everyone else meanwhile.
 4. A source that shows *Notion is connected but not set up yet* is a pending OAuth source (`content_source.status = disabled`, `config.setupPending = true`); the user finishes it at `/w/:ws/setup?source=...`. Disconnecting it discards the token.
+
+### Phase 6 AI assistance
+1. Set `ANTHROPIC_API_KEY` (and optionally `AI_MODEL`, default `claude-opus-5`); `AI_PROVIDER=fake` runs everything without a provider. Redeploy. The AI page shows the provider and model.
+2. Per workspace: Dashboard → AI → *Enable AI assistance*, voice, banned phrases, optional cap. The plan must include AI tokens (`aiTokensPerMonth` in `plans.ts`; comp with `workspace.plan` as for other limits).
+3. Diagnose a request: `select purpose, model, outcome, error, total_tokens, cost_usd, created_at from ai_generation where workspace_id = '…' order by created_at desc limit 20`. `outcome = guardrail` means a banned phrase; `error` carries the provider message (rate limit, refusal, invalid request).
+4. Budget exhausted: the Notion note says so and the dashboard shows 100%; it resets at month start (UTC). Raise the cap only by plan or by removing the workspace's lower `monthlyTokenBudget`.
+5. Provider outage: syncs keep running; each trigger is reset with a note, and the team re-ticks the box later. No retries are made automatically.
 
 ### Phase 5 metrics and reports
 - Queue `metrics-fetch` (worker consumer, concurrency 2). A publication's schedule: `select metrics_tier, metrics_next_at, metrics_attempts, metrics_error from publication where id = '…'`; snapshots: `select tier, fetched_at, impressions, reactions, comments, shares, clicks from publication_metric where publication_id = '…' order by tier`.
@@ -209,3 +218,6 @@ Never `select access_token_enc` for any reason other than confirming it is null 
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | api (the worker only reads the database for grace expiry) | Webhook secret is required with the key |
 | `STRIPE_PRICE_SOLO` / `STRIPE_PRICE_TEAM` / `STRIPE_PRICE_AGENCY` | api | Stripe price ids; a missing one hides the plan |
 | `API_INTERNAL_URL` | web | Where the dashboard proxies to (api's internal address) |
+| `ANTHROPIC_API_KEY` | api | Phase 6 AI assistance; unset = AI off everywhere |
+| `AI_MODEL` | api | Default model id (default `claude-opus-5`); workspaces may override |
+| `AI_PROVIDER` | api | `anthropic` (default with a key) or `fake` |

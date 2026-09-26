@@ -15,6 +15,8 @@ export interface PlanLimits {
   postsPerMonth: number;
   /** Members per workspace, including the owner; Infinity = unlimited. */
   members: number;
+  /** Phase 6: AI tokens (input + output) per calendar month; 0 = no AI assistance. */
+  aiTokensPerMonth: number;
 }
 
 export interface Plan {
@@ -30,25 +32,25 @@ export const PLANS: Record<PlanId, Plan> = {
     id: 'free',
     name: 'Free',
     priceUsd: 0,
-    limits: { accounts: 1, postsPerMonth: 10, members: 1 },
+    limits: { accounts: 1, postsPerMonth: 10, members: 1, aiTokensPerMonth: 0 },
   },
   solo: {
     id: 'solo',
     name: 'Solo',
     priceUsd: 19,
-    limits: { accounts: 3, postsPerMonth: 100, members: 2 },
+    limits: { accounts: 3, postsPerMonth: 100, members: 2, aiTokensPerMonth: 200_000 },
   },
   team: {
     id: 'team',
     name: 'Team',
     priceUsd: 49,
-    limits: { accounts: 10, postsPerMonth: 500, members: 5 },
+    limits: { accounts: 10, postsPerMonth: 500, members: 5, aiTokensPerMonth: 1_000_000 },
   },
   agency: {
     id: 'agency',
     name: 'Agency',
     priceUsd: 149,
-    limits: { accounts: 50, postsPerMonth: 5000, members: Infinity },
+    limits: { accounts: 50, postsPerMonth: 5000, members: Infinity, aiTokensPerMonth: 5_000_000 },
   },
 };
 

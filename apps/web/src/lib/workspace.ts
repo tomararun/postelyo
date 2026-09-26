@@ -21,6 +21,14 @@ export interface WorkspaceDto {
   } | null;
   evergreen: { slots: { weekday: number; time: string }[]; minGapDays?: number } | null;
   approval: { required: boolean; reviewers: string[] } | null;
+  /** Phase 6 */
+  ai: {
+    enabled: boolean;
+    model?: string;
+    voice?: string;
+    bannedPhrases?: string[];
+    monthlyTokenBudget?: number;
+  };
 }
 
 /** Signed-in user plus the workspace they are looking at; redirects to sign-in or 404s. */

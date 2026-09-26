@@ -115,12 +115,27 @@ Deferred: metrics for Postelyo's own first comments, follower counts and audienc
 
 ---
 
+## Phase 6 – AI assistance (built 2026-09-26)
+
+Goal: the AI does the tedious drafting and adaptation inside the Notion workflow; humans keep control. Product plan: [product-roadmap.md](./product-roadmap.md) Phase 6.
+
+| Item | Notes | Hook | Status |
+|------|-------|------|--------|
+| AI service, provider abstraction, budgets, audit | `AiService` gate, `AnthropicProvider` (official SDK, `claude-opus-5` default) + `FakeAiProvider`, `ai_generation` log with cost, plan entitlements, per-workspace cap | §7.6 | Done |
+| Platform adaptation from Notion | `Generate variants` checkbox fills empty per-platform fields only; voice + banned phrases; note with suggestions | `AiCompanionService` | Done |
+| Drafts from ideas and repurposing | `Draft with AI` idea status; `Repurpose` select → linked Draft pages | ideas + companion | Done |
+| Alt text | Generated at inspection for images without a description; used at render | `media_asset.alt_text` | Done |
+| Suggestions from analytics | Hashtags and best times passed into prompts and shown in the note | Phase 5 read models | Done |
+| Enforcement and visibility | `post.ai_assisted`, approval policy applies, dashboard AI page with usage, cost, settings and log | `/w/{id}/ai` | Done |
+
+Deferred: image generation, translation, automatic A/B tests of variants.
+
+---
+
 ## Later – Intelligence and growth
 
 | Item | Notes | Hook |
 |------|-------|------|
-| AI content generation | Draft from an idea/brief; human-in-the-loop | Produces canonical content |
-| AI platform adaptation | Per-publication `content_override` generated before render | `publication.content_override` |
 | Campaigns | Group posts, campaign-level scheduling and reporting | New `campaign` table, `post.campaign_id` |
 | Public API + outbound webhooks | API keys, `Idempotency-Key`, signed webhooks from the audit stream | §11.2, §14 |
 | Scale-out | Redis/BullMQ or SQS if Postgres queue saturates; audit partitioning; regional deployments | §20 |

@@ -15,6 +15,7 @@ export function Shell({
     ? [
         ['Posts', `/w/${workspace.id}/posts`],
         ['Analytics', `/w/${workspace.id}/analytics`],
+        ['AI', `/w/${workspace.id}/ai`],
         ['Connections', `/w/${workspace.id}/connections`],
         ['Team', `/w/${workspace.id}/team`],
         ['Billing', `/w/${workspace.id}/billing`],

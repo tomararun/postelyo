@@ -24,6 +24,7 @@
     "seed": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.128.0",
     "@aws-sdk/client-s3": "^3.1141.0",
     "@aws-sdk/s3-request-presigner": "^3.1141.0",
     "@fastify/formbody": "^8.0.2",

@@ -74,7 +74,15 @@ export const CAMPAIGN_STATUS_OPTIONS = [
 export const IDEA_STATUS_OPTIONS = [
   { name: 'New', color: 'gray' },
   { name: 'Promote', color: 'blue' },
+  { name: 'Draft with AI', color: 'purple' },
   { name: 'Promoted', color: 'green' },
+] as const;
+
+/** Phase 6 `Repurpose` options; cleared by Postelyo after the drafts are created. */
+export const REPURPOSE_OPTIONS = [
+  { name: 'Thread', color: 'blue' },
+  { name: 'Short variants', color: 'blue' },
+  { name: 'Carousel outline', color: 'blue' },
 ] as const;
 
 /** Notion API property definitions for `POST /v1/databases` (content database, without relations). */
@@ -105,6 +113,9 @@ export function templateProperties(): Record<string, unknown> {
     Shares: { number: {} },
     Clicks: { number: {} },
     'Metrics Updated': { date: {} },
+    // Phase 6 AI triggers
+    'Generate variants': { checkbox: {} },
+    Repurpose: { select: { options: [...REPURPOSE_OPTIONS] } },
     // System
     'Postelyo Status': { select: { options: [...POSTELYO_STATUS_OPTIONS] } },
     'Postelyo Note': { rich_text: {} },

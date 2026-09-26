@@ -32,6 +32,7 @@ interface Post {
   sourceStatus: string | null;
   externalUrl: string | null;
   validationErrors: { message: string }[] | null;
+  aiAssisted: boolean;
   publications: Publication[];
 }
 
@@ -165,6 +166,11 @@ export default async function PostsPage({
                     </a>
                   ) : (
                     p.title
+                  )}
+                  {p.aiAssisted && (
+                    <div className="mt-1">
+                      <Badge>AI assisted</Badge>
+                    </div>
                   )}
                   {p.validationErrors && p.validationErrors.length > 0 && (
                     <div className="text-xs text-[var(--danger)]">

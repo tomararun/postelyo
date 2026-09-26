@@ -35,6 +35,19 @@ export interface WorkspaceSettings {
   evergreen?: EvergreenSettings;
   /** Phase 4: opt-in approval enforcement. */
   approval?: ApprovalSettings;
+  /** Phase 6: AI assistance flag, voice and guardrails. */
+  ai?: AiSettings;
+}
+
+export interface AiSettings {
+  enabled: boolean;
+  /** Model override (server default otherwise). */
+  model?: string | undefined;
+  /** Brand voice document injected into every prompt. */
+  voice?: string | undefined;
+  bannedPhrases?: string[] | undefined;
+  /** Lower than the plan entitlement only. */
+  monthlyTokenBudget?: number | undefined;
 }
 
 export interface UtmSettings {
@@ -109,6 +122,23 @@ function readEvergreen(raw: unknown): EvergreenSettings | undefined {
   return out;
 }
 
+function readAi(raw: unknown): AiSettings | undefined {
+  if (typeof raw !== 'object' || raw === null) return undefined;
+  const r = raw as Record<string, unknown>;
+  const out: AiSettings = { enabled: r['enabled'] === true };
+  if (typeof r['model'] === 'string' && r['model'].trim()) out.model = r['model'].trim();
+  if (typeof r['voice'] === 'string' && r['voice'].trim())
+    out.voice = r['voice'].trim().slice(0, 4000);
+  if (Array.isArray(r['bannedPhrases']))
+    out.bannedPhrases = r['bannedPhrases']
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .map((x) => x.trim())
+      .slice(0, 100);
+  if (typeof r['monthlyTokenBudget'] === 'number' && r['monthlyTokenBudget'] >= 0)
+    out.monthlyTokenBudget = Math.floor(r['monthlyTokenBudget']);
+  return out;
+}
+
 function readApproval(raw: unknown): ApprovalSettings | undefined {
   if (typeof raw !== 'object' || raw === null) return undefined;
   const r = raw as Record<string, unknown>;
@@ -147,6 +177,8 @@ export function readSettings(ws: Pick<Workspace, 'settings'>): WorkspaceSettings
   if (evergreen) out.evergreen = evergreen;
   const approval = readApproval(raw.approval);
   if (approval) out.approval = approval;
+  const ai = readAi(raw.ai);
+  if (ai) out.ai = ai;
   return out;
 }
 

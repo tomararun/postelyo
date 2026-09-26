@@ -442,6 +442,8 @@ export function enrichRenderedMedia(
       byteSize: row.byteSize ?? m.byteSize,
       ...(row.width !== null ? { width: row.width } : {}),
       ...(row.height !== null ? { height: row.height } : {}),
+      // Phase 6: a generated description replaces the file-name placeholder.
+      ...(row.altText && (!m.alt || m.alt === row.name) ? { alt: row.altText } : {}),
       ...(row.contentHash ? { contentHash: row.contentHash } : {}),
       ...(reusable ? { providerRef: cached.ref } : {}),
     };

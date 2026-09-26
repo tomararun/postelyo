@@ -378,6 +378,26 @@ Effective plan = `plan` while `active`/`trialing`, or while `past_due` before `g
 
 Phase 5 columns on existing tables: `publication.metrics_tier` (completed tiers), `metrics_next_at`, `metrics_fetched_at`, `metrics_attempts`, `metrics_error`; `membership.weekly_report` (default true); `workspace.settings.weeklyReportLastWeek`; `content_source.config.analyticsDatabaseId`, `analyticsPropertyMap`, `analyticsRows`, `analyticsRowHashes`, `analyticsWrittenAt`.
 
+### 2.19 `ai_generation` (Phase 6)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS |
+| purpose | text | `variants`, `draft_from_idea`, `repurpose`, `alt_text`, `suggestions` |
+| provider, model | text | `anthropic` / `fake`; model id as reported by the provider |
+| entity_type, entity_id | text null | Notion page id, idea page id or media asset |
+| prompt_text, output_text | text | Full prompt (system + user) and output, each capped at 20 000 characters; never credentials |
+| input_tokens, output_tokens, cache_read_tokens, total_tokens | integer | |
+| cost_usd | text | 6 decimals from the pricing table |
+| duration_ms | integer | |
+| outcome | text | `ok`, `guardrail` (banned phrase, discarded), `error` |
+| error | text null | |
+| created_by_actor | text | `system:notion-sync`, `user:<id>` |
+| created_at | timestamptz | Budget window is the calendar month (UTC) |
+
+Phase 6 columns on existing tables: `post.ai_assisted`, `media_asset.alt_text`; `workspace.settings.ai` (`enabled`, `model`, `voice`, `bannedPhrases`, `monthlyTokenBudget`); `PlanLimits.aiTokensPerMonth`.
+
 ### 2.13 Queue tables
 
 Owned by pg-boss in its own schema (`pgboss`). Not part of the domain; never queried by domain code.

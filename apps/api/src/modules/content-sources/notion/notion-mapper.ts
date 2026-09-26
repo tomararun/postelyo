@@ -40,6 +40,10 @@ export interface SourcePost {
   repeatOf: string[];
   /** Phase 4: plain text of `First Comment`; empty when absent. */
   firstComment: string;
+  /** Phase 6: the `Generate variants` checkbox. */
+  generateVariants: boolean;
+  /** Phase 6: the `Repurpose` option as written, or null. */
+  repurpose: string | null;
   /** Current values of system-owned properties, used to patch only on change. */
   system: {
     postelyoStatus: string | null;
@@ -141,6 +145,11 @@ export function mapPage(page: NotionPage, map: PropertyMap): SourcePost {
       typeof repeatUntil['start'] === 'string' ? repeatUntil['start'].slice(0, 10) : null,
     repeatOf: relationIds(prop('Repeat Of')['relation']),
     firstComment: richTextToPlain(prop('First Comment')['rich_text']).trim(),
+    generateVariants: prop('Generate variants')['checkbox'] === true,
+    repurpose:
+      typeof asRecord(prop('Repurpose')['select'])['name'] === 'string'
+        ? (asRecord(prop('Repurpose')['select'])['name'] as string)
+        : null,
     system: {
       postelyoStatus: typeof psStatus['name'] === 'string' ? psStatus['name'] : null,
       postelyoNote: richTextToPlain(prop('Postelyo Note')['rich_text']),

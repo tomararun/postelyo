@@ -18,6 +18,7 @@ Status: living document, started with Phase 3 (2026-09-26). Audience: whoever si
 | Content snapshots (text, image references) | `post.content`, `media_asset`, `media_object` (object storage) | Publish deterministically; audit what was sent | Post rows until purge; unreferenced media objects pruned after 7 days |
 | Publication results and attempts (provider post ids and URLs, error codes) | `publication`, `publish_attempt` | Status, retries, reconciliation | Until purge; `response_meta` pruned |
 | Audit trail | `audit_log` | Accountability, metering, security | Indefinite; `workspace_id` is nulled at purge so entries are no longer attributable to a tenant |
+| AI generations (Phase 6) | `ai_generation` | Audit of every prompt and output, cost accounting | Until purge; contains page text the team wrote, never credentials |
 | Post metrics (Phase 5) | `publication_metric` | Show performance in Notion and the dashboard, weekly report | 400 days; aggregate numbers only |
 | Campaign mirrors, approvals, short links (Phase 4) | `campaign`, `approval`, `short_link` | Campaign summaries, reviewer sign-off, click counts | Until purge; short links keep aggregate click counts only (no IP, no user agent) |
 | Billing identity | `billing_customer`, `subscription` | Link the Stripe customer and current plan | Until purge (Stripe keeps its own records) |
@@ -40,6 +41,7 @@ Not stored: passwords (magic links only), card data (Stripe Checkout and Custome
 | Fly.io (or the chosen PaaS) | Hosting, Postgres | Everything above |
 | Cloudflare R2 (when `STORAGE_DRIVER=s3`) | Image storage with public URLs | Images the customer chose to publish |
 | Stripe | Subscriptions and payments | Owner email, workspace id (as metadata), payment details (never reach Postelyo) |
+| Anthropic (when AI assistance is on) | Text generation and image descriptions | Page text, workspace voice document, images attached to posts; no account credentials. 30-day retention on Anthropic's side per their API terms. |
 | Email provider behind `SMTP_URL` | Magic links, invitations, notices | Recipient email, workspace and account names |
 | Sentry (when `SENTRY_DSN` is set) | Error tracking | Redacted errors; tokens are never logged |
 | Notion, LinkedIn, X, Meta | The platforms the customer connects | Content published on their instruction |

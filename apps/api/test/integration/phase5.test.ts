@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { pino } from 'pino';
 import type { FakeProvider } from '@postelyo/publishing-core';
 import {
@@ -48,8 +48,14 @@ describe('phase 5 analytics', () => {
     );
     expect([200, 207]).toContain(res.statusCode);
   };
+  // Fake page ids repeat across suites sharing the database; scope by workspace.
   const postByPage = async (pageId: string) =>
-    (await stack.db.db.select().from(post).where(eq(post.externalId, pageId)))[0]!;
+    (
+      await stack.db.db
+        .select()
+        .from(post)
+        .where(and(eq(post.externalId, pageId), eq(post.workspaceId, workspaceId)))
+    )[0]!;
   const pubsOf = async (postId: string) =>
     stack.db.db.select().from(publication).where(eq(publication.postId, postId));
   const publishAll = async (pubs: { id: string; cycleNo: number }[]) => {

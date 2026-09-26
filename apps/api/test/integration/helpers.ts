@@ -13,6 +13,7 @@ import type { App } from '../../src/http/app.js';
 import { RecordingEnqueuer, type JobEnqueuer } from '../../src/modules/publishing/jobs.js';
 import { buildServices, type Services } from '../../src/services.js';
 import type { BillingGateway } from '../../src/modules/billing/gateway.js';
+import type { AiProvider } from '../../src/modules/ai/provider.js';
 import type { Clock } from '../../src/shared/clock.js';
 
 export const TEST_ENCRYPTION_KEYS = 'k1:' + Buffer.alloc(32, 7).toString('base64');
@@ -68,6 +69,8 @@ export interface TestStackOptions {
   workerId?: string;
   /** Phase 3: stub Stripe Checkout/Portal; the webhook path is exercised with signed events. */
   billingGateway?: BillingGateway;
+  /** Phase 6: inject the fake AI provider. */
+  aiProvider?: AiProvider;
 }
 
 export async function createTestStack(opts: TestStackOptions = {}): Promise<TestStack> {
@@ -91,6 +94,7 @@ export async function createTestStack(opts: TestStackOptions = {}): Promise<Test
     clock,
     random: () => 0.5,
     ...(opts.billingGateway ? { billingGateway: opts.billingGateway } : {}),
+    ...(opts.aiProvider ? { aiProvider: opts.aiProvider } : {}),
   });
   const app = await buildServer({
     env,

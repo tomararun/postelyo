@@ -57,8 +57,14 @@ describe('phase 4 content operations', () => {
     }>();
   };
 
+  // Fake page ids repeat across suites sharing the database; scope by workspace.
   const postByPage = async (pageId: string) =>
-    (await stack.db.db.select().from(post).where(eq(post.externalId, pageId)))[0]!;
+    (
+      await stack.db.db
+        .select()
+        .from(post)
+        .where(and(eq(post.externalId, pageId), eq(post.workspaceId, workspaceId)))
+    )[0]!;
   const pubsOf = async (postId: string) =>
     stack.db.db.select().from(publication).where(eq(publication.postId, postId));
 

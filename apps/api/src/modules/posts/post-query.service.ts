@@ -26,6 +26,8 @@ export interface PostListItem {
   validationErrors: unknown;
   warnings: unknown;
   contentHash: string;
+  /** Phase 6 */
+  aiAssisted: boolean;
   cycleNo: number;
   deletedAt: Date | null;
   updatedAt: Date;
@@ -104,6 +106,7 @@ export class PostQueryService {
       validationErrors: p.validationErrors,
       warnings: p.warnings,
       contentHash: p.contentHash,
+      aiAssisted: p.aiAssisted,
       cycleNo: p.cycleNo,
       deletedAt: p.deletedAt,
       updatedAt: p.updatedAt,

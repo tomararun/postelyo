@@ -105,6 +105,13 @@ export interface PostIngestDeps {
   campaigns?: CampaignService;
   /** Phase 4: opt-in approval enforcement. */
   approvals?: ApprovalService;
+  /** Phase 6: alt text for images the author did not describe. */
+  altText?: (
+    ctx: TenantContext,
+    ws: IngestInput['workspace'],
+    asset: MediaAsset,
+    postTitle: string,
+  ) => Promise<void>;
 }
 
 /**
@@ -201,7 +208,14 @@ export class PostIngestService {
       for (const row of media.rows) {
         if (row.contentHash && !media.changed.has(row.id) && !row.lastError) continue;
         try {
-          await this.deps.media.inspect(row);
+          const inspected = await this.deps.media.inspect(row);
+          if (this.deps.altText && !inspected.altText && !inspected.lastError) {
+            await this.deps
+              .altText(ctx, input.workspace, inspected, page.title)
+              .catch((err: unknown) => {
+                this.deps.logger.warn({ err, assetId: row.id }, 'alt text generation skipped');
+              });
+          }
         } catch (err) {
           const message = err instanceof MediaError ? err.message : 'could not read the file';
           issues.push({ code: 'MEDIA_INVALID', message: `Image "${row.name}": ${message}` });
