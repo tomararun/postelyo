@@ -21,8 +21,16 @@ import { PostQueryService } from './modules/posts/post-query.service.js';
 import { PublishEngine } from './modules/publishing/engine.js';
 import type { JobEnqueuer } from './modules/publishing/jobs.js';
 import { PublicationService } from './modules/publishing/publication.service.js';
-import { FakeProvider } from './modules/publishing/providers/fake/fake-provider.js';
-import { LinkedInProvider } from './modules/publishing/providers/linkedin/linkedin-provider.js';
+import {
+  FacebookProvider,
+  FakeProvider,
+  InstagramProvider,
+  LinkedInProvider,
+  XProvider,
+} from '@postelyo/publishing-core';
+import { xConfig } from './config/env.js';
+import { createStorage, type ObjectStorage } from './infra/storage/index.js';
+import { XOAuthClient } from './modules/connections/x/x-oauth.js';
 import { ReconciliationService } from './modules/publishing/reconciliation.service.js';
 import { createProviderRegistry, type ProviderRegistry } from './modules/publishing/registry.js';
 import { SchedulerService } from './modules/scheduling/scheduler.service.js';
@@ -32,8 +40,24 @@ import { systemClock, type Clock } from './shared/clock.js';
 export interface ServiceDeps {
   env: Pick<
     Env,
-    'PROVIDER_MODE' | 'APP_BASE_URL' | 'ALERT_EMAIL' | 'NODE_ENV' | 'NOTION_WEBHOOK_SECRET'
+    | 'PROVIDER_MODE'
+    | 'APP_BASE_URL'
+    | 'ALERT_EMAIL'
+    | 'NODE_ENV'
+    | 'NOTION_WEBHOOK_SECRET'
+    | 'X_CLIENT_ID'
+    | 'X_CLIENT_SECRET'
+    | 'STORAGE_DRIVER'
+    | 'STORAGE_LOCAL_DIR'
+    | 'S3_ENDPOINT'
+    | 'S3_REGION'
+    | 'S3_BUCKET'
+    | 'S3_ACCESS_KEY_ID'
+    | 'S3_SECRET_ACCESS_KEY'
+    | 'S3_PUBLIC_BASE_URL'
   >;
+  /** Overrides the storage built from env (tests). */
+  storage?: ObjectStorage | undefined;
   db: Db;
   logger: Logger;
   keyProvider: KeyProvider;
@@ -52,6 +76,7 @@ export interface Services {
   socialAccounts: SocialAccountService;
   contentSources: ContentSourceService;
   providers: ProviderRegistry;
+  storage: ObjectStorage;
   media: MediaService;
   ingest: PostIngestService;
   notionSync: NotionSyncService;
@@ -78,15 +103,41 @@ export function buildServices(deps: ServiceDeps): Services {
   const fetchOpt = deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {};
   const workspaces = new WorkspaceService(deps.db);
   const vault = new CredentialVault(deps.db, deps.keyProvider);
-  const socialAccounts = new SocialAccountService(deps.db, vault);
+  const socialAccounts = new SocialAccountService(deps.db, vault, clock);
+  // X access tokens last ~2 h: the worker refreshes them before publishing.
+  const xc = xConfig(deps.env);
+  if (xc) {
+    const xClient = new XOAuthClient({
+      clientId: xc.clientId,
+      clientSecret: xc.clientSecret,
+      redirectUri: new URL('/oauth/x/callback', deps.env.APP_BASE_URL).toString(),
+      ...fetchOpt,
+    });
+    socialAccounts.registerRefresher('x', async (refreshToken) => {
+      const t = await xClient.refresh(refreshToken, clock.now());
+      return {
+        accessToken: t.accessToken,
+        expiresAt: t.expiresAt,
+        scopes: t.scopes,
+        refreshToken: t.refreshToken,
+      };
+    });
+  }
   const contentSources = new ContentSourceService({ db: deps.db, vault, ...fetchOpt });
   const providers =
     deps.env.PROVIDER_MODE === 'fake'
       ? createProviderRegistry([new FakeProvider()], { fallback: new FakeProvider() })
-      : createProviderRegistry([new LinkedInProvider(fetchOpt)]);
+      : createProviderRegistry([
+          new LinkedInProvider(fetchOpt),
+          new XProvider(fetchOpt),
+          new FacebookProvider(fetchOpt),
+          new InstagramProvider(fetchOpt),
+        ]);
+  const storage = deps.storage ?? createStorage(deps.env);
   const media = new MediaService({
     db: deps.db,
     contentSources,
+    storage,
     clock,
     logger: deps.logger,
     ...fetchOpt,
@@ -185,6 +236,7 @@ export function buildServices(deps: ServiceDeps): Services {
     socialAccounts,
     contentSources,
     providers,
+    storage,
     media,
     ingest,
     notionSync,

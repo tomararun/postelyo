@@ -7,6 +7,7 @@ const current = {
   publishedUrl: null,
   publishedAt: null,
   postelyoId: '',
+  publishedUrls: null,
 };
 
 describe('writebackPatch', () => {

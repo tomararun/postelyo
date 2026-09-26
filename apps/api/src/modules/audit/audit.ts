@@ -21,6 +21,7 @@ export type AuditEvent =
   | 'social_account.reconnected'
   | 'social_account.disconnected'
   | 'social_account.status_changed'
+  | 'social_account.token_refreshed'
   | 'content_source.connected'
   | 'content_source.updated'
   | 'content_source.disconnected'

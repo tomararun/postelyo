@@ -60,6 +60,7 @@ async function main(): Promise<void> {
       digest: services.digest,
       heartbeat: services.heartbeat,
       notionWebhooks: services.notionWebhooks,
+      media: services.media,
     },
     logger,
   );

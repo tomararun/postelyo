@@ -37,6 +37,11 @@ describe('row-level security', () => {
     }
   });
   afterAll(async () => {
+    // The scheduler tick is global: withdraw the rows this suite created.
+    await stack.db.db
+      .update(publication)
+      .set({ state: 'cancelled' })
+      .where(eq(publication.workspaceId, wsB));
     await stack.close();
   });
 

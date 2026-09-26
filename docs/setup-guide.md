@@ -34,6 +34,8 @@ On the **Connections** page paste the integration secret and the database link, 
 
 Click **Connect LinkedIn profile**, sign in to LinkedIn, and approve. This connects your **personal profile**. LinkedIn authorizations last about 60 days. You will get an email 7 days before it expires with a **Reconnect** link. If it expires, scheduled posts wait until you reconnect and then publish.
 
+**X, Facebook Pages and Instagram** appear on the Connections page once your Postelyo admin has enabled them for the workspace. **Connect X profile** signs you in to X (the authorization refreshes itself). **Connect Facebook Pages you manage** signs you in to Facebook and connects every Page you manage plus the Instagram professional account linked to each Page; disconnect the ones Postelyo should not post to. Instagram posts need an image. In Notion, pick `X`, `Facebook Page` or `Instagram` in `Platforms`, and use `X Text` or `Instagram Caption` when the shared body does not fit that platform.
+
 **LinkedIn Pages (company pages):** click **Connect LinkedIn Pages you administer**. Every Page where you are an administrator is connected; disconnect the ones Postelyo should not post to. In Notion, choose `LinkedIn Page` in `Platforms` to post as the Page, or `LinkedIn Page: <Page name>` when several Pages are connected. This requires the Postelyo LinkedIn app to have Community Management API access; if the connection reports that it lacks access, the profile still works and your Postelyo contact will follow up.
 
 ## 6. Publish a test post

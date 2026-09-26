@@ -54,7 +54,9 @@ Required properties (names fixed in MVP; configurable mapping is a roadmap item)
 | `Name` | title | user | Internal title |
 | `Status` | status | user | Editorial workflow state, see §4.5 |
 | `Publish Date` | date | user | When to publish (time optional) |
-| `Platforms` | multi-select | user | `LinkedIn`; Phase 1 adds `LinkedIn Page` and `LinkedIn Page: <name>` |
+| `Platforms` | multi-select | user | `LinkedIn`; Phase 1 adds `LinkedIn Page`; Phase 2 adds `X`, `Facebook Page`, `Instagram` and the `<Platform>: <account name>` picker |
+| `LinkedIn Text`, `X Text`, `Facebook Text`, `Instagram Caption` | rich text | user (optional) | Phase 2: per-platform text override; the body is used when empty |
+| `Published URLs` | rich text | system (optional) | Phase 2: one link per platform; `Postelyo Status` aggregates (`Partially failed` when some targets failed) |
 | `Post Text` | rich text or page body | user | The content; page body preferred (longer, formatting) |
 | `Media` | files | user | Optional single image |
 | `Time Zone` | select/text | user (optional) | IANA name overriding the workspace default |

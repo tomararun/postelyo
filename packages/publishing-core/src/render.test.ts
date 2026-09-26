@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CanonicalContent } from '../posts/content.js';
+import type { CanonicalContent } from './content.js';
 import { contentToPlainText } from './render.js';
 
 describe('contentToPlainText', () => {

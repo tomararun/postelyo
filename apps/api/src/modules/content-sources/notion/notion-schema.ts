@@ -13,6 +13,8 @@ export interface ContractProperty {
   owner: 'user' | 'system';
   requiredOptions?: readonly string[];
   recommendedOptions?: readonly string[];
+  /** Optional property whose absence is not even a warning (newer, additive columns). */
+  silent?: boolean;
 }
 
 export const NOTION_CONTRACT: readonly ContractProperty[] = [
@@ -34,18 +36,25 @@ export const NOTION_CONTRACT: readonly ContractProperty[] = [
     required: true,
     owner: 'user',
     requiredOptions: ['LinkedIn'],
-    // Additive (Phase 1): posts as a LinkedIn Page the workspace connected.
-    recommendedOptions: ['LinkedIn Page'],
+    // Additive: Phase 1 adds LinkedIn Pages; Phase 2 adds X, Facebook Pages and Instagram.
+    recommendedOptions: ['LinkedIn Page', 'X', 'Facebook Page', 'Instagram'],
   },
   { name: 'Post Text', types: ['rich_text'], required: false, owner: 'user' },
   { name: 'Media', types: ['files'], required: false, owner: 'user' },
   { name: 'Time Zone', types: ['select', 'rich_text'], required: false, owner: 'user' },
+  // Phase 2: optional per-platform text overrides; the body is used when empty.
+  { name: 'LinkedIn Text', types: ['rich_text'], required: false, owner: 'user', silent: true },
+  { name: 'X Text', types: ['rich_text'], required: false, owner: 'user', silent: true },
+  { name: 'Facebook Text', types: ['rich_text'], required: false, owner: 'user', silent: true },
+  { name: 'Instagram Caption', types: ['rich_text'], required: false, owner: 'user', silent: true },
   // System-owned select options are created on write, so only the property must exist.
   { name: 'Postelyo Status', types: ['select'], required: true, owner: 'system' },
   { name: 'Postelyo Note', types: ['rich_text'], required: true, owner: 'system' },
   { name: 'Published URL', types: ['url'], required: true, owner: 'system' },
   { name: 'Published At', types: ['date'], required: true, owner: 'system' },
   { name: 'Postelyo ID', types: ['rich_text'], required: true, owner: 'system' },
+  // Phase 2: one link per platform when a page publishes to several; written only when present.
+  { name: 'Published URLs', types: ['rich_text'], required: false, owner: 'system', silent: true },
 ];
 
 export type SchemaIssueCode = 'MISSING_PROPERTY' | 'WRONG_TYPE' | 'MISSING_OPTION';
@@ -83,6 +92,7 @@ export function validateNotionDatabase(db: NotionDatabase): SchemaValidation {
   for (const c of NOTION_CONTRACT) {
     const found = byNorm.get(norm(c.name));
     if (!found) {
+      if (c.silent) continue;
       (c.required ? errors : warnings).push({
         code: 'MISSING_PROPERTY',
         property: c.name,

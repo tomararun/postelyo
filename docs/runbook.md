@@ -74,6 +74,8 @@ Per-workspace counts of published, failed, needs-review, accounts needing re-aut
 | Connect or disconnect LinkedIn Pages | Connections → *Connect LinkedIn Pages you administer* / *Disconnect* per Page | admin+ |
 | Replace the Notion token | Connections → Notion form | admin+ |
 | Change the daily cap or enable webhooks | `PATCH /v1/workspaces/:ws {"dailyCapPerAccount": 50}` / `{"notionWebhooks": true}` | admin+ |
+| Enable X, Facebook or Instagram for a workspace | `PATCH /v1/workspaces/:ws {"providers": {"x": true, "facebook": true, "instagram": true}}` (server app credentials must be set too) | admin+ |
+| Connect X / Facebook Pages + Instagram | Connections → *Connect X profile* / *Connect Facebook Pages you manage* | admin+ |
 
 Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by editing the post. Postelyo never retries a terminal failure by itself.
 
@@ -97,6 +99,9 @@ Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by
 2. Notion posts a one-time `verification_token`; the api logs it at `warn` level ("set NOTION_WEBHOOK_SECRET to this value"). Set the variable, redeploy, then confirm the subscription in Notion.
 3. Enable per workspace: `PATCH /v1/workspaces/:ws {"notionWebhooks": true}`. Events for other workspaces are stored as `ignored:webhooks_disabled`.
 4. Verify: `select external_event_id, event_type, outcome from webhook_event order by received_at desc limit 20`. Polling continues regardless, so a broken subscription only costs latency.
+
+### Media storage
+Images are stored once per workspace and content hash. With `STORAGE_DRIVER=local` the api serves them at `/media/<key>` from `STORAGE_LOCAL_DIR` (single instance only; the worker and api must share the directory or the volume). In production use `s3` with Cloudflare R2 and a public custom domain (`S3_PUBLIC_BASE_URL`), because Instagram and Facebook fetch the image by URL. Maintenance deletes objects no asset references for 7 days (`mediaPruned` in the maintenance log). A publication failing with "Image could not be prepared" means the variant derivation failed: check the worker log for the `sharp` error and the original file in storage.
 
 ### Database role for the application
 The app must connect as a role that is **not** a superuser and does not have `BYPASSRLS`; otherwise row-level security is silently inactive (preflight reports `database role`). Migrations may run as the owner. On Fly Postgres, create a dedicated role and grant it the schema privileges (see `test/integration/global-setup.ts` for the exact grants used by the suite). The local docker-compose user is a superuser; preflight warns about it in development.
@@ -152,5 +157,9 @@ Never `select access_token_enc` for any reason other than confirming it is null 
 | `PROVIDER_MODE` | both | `live` in staging/production; `fake` never publishes |
 | `METRICS_TOKEN` | api | protects `/metrics` |
 | `NOTION_WEBHOOK_SECRET` | api | Notion webhook verification token; unset = inbound webhooks ignored |
+| `X_CLIENT_ID` / `X_CLIENT_SECRET` | both | X OAuth 2.0 app (confidential client); worker refreshes tokens. Both or neither |
+| `META_APP_ID` / `META_APP_SECRET` | api | Meta app for Facebook Pages and Instagram. Both or neither |
+| `STORAGE_DRIVER` | both | `local` (files under `STORAGE_LOCAL_DIR`, served at `/media/*`) or `s3` |
+| `S3_ENDPOINT` / `S3_REGION` / `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` / `S3_PUBLIC_BASE_URL` | both | Required for `s3`; R2: endpoint `https://<account>.r2.cloudflarestorage.com`, region `auto`, public base URL = the bucket's custom domain |
 | `APP_VERSION` | both | set by the deploy pipeline; shown in heartbeats |
 | `INSTANCE_ID` | worker | defaults to hostname-pid |

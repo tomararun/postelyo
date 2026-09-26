@@ -1,3 +1,5 @@
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { inject } from 'vitest';
 import { pino } from 'pino';
 import type { Env } from '../../src/config/env.js';
@@ -24,6 +26,8 @@ export const testEnv: Env = {
   MAIL_TRANSPORT: 'log',
   MAIL_FROM: 'Postelyo <test@postelyo.local>',
   ALERT_EMAIL: 'ops@example.com',
+  STORAGE_DRIVER: 'local',
+  STORAGE_LOCAL_DIR: path.join(tmpdir(), 'postelyo-media-test'),
 };
 
 /** Real-time clock that tests can advance without waiting. */

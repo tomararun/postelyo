@@ -108,28 +108,34 @@ describe('connections', () => {
     expect(events.map((e) => e.event)).toEqual(['social_account.connected']);
   });
 
-  it('reconnecting the same profile refreshes tokens; a different profile is rejected', async () => {
+  it('reconnecting the same profile refreshes tokens; a different profile becomes a second account', async () => {
     const { cookie, workspaceId } = await stack.signInWithWorkspace(uniqueEmail('li2'));
     await connectLinkedIn(cookie, workspaceId, 'good-code');
     const again = await connectLinkedIn(cookie, workspaceId, 'good-code');
     expect(again.location).toContain('connected=linkedin');
 
+    // Phase 2: any number of accounts per provider; the Notion Platforms option picks one.
     const other = await connectLinkedIn(cookie, workspaceId, 'good-code-2');
-    expect(other.location).toContain('error=');
-    expect(decodeURIComponent(other.location)).toContain('different LinkedIn profile');
+    expect(other.location).toContain('connected=linkedin');
 
     const list = await stack.app.inject({
       method: 'GET',
       url: `/v1/workspaces/${workspaceId}/social-accounts`,
       headers: { cookie },
     });
-    expect(list.json<{ accounts: unknown[] }>().accounts).toHaveLength(1);
+    expect(
+      list
+        .json<{ accounts: { displayName: string }[] }>()
+        .accounts.map((a) => a.displayName)
+        .sort(),
+    ).toEqual(['Alice Example', 'Bob Example']);
 
     const events = await stack.db.db
       .select({ event: auditLog.event })
       .from(auditLog)
       .where(and(eq(auditLog.workspaceId, workspaceId), eq(auditLog.entityType, 'social_account')));
     expect(events.map((e) => e.event).sort()).toEqual([
+      'social_account.connected',
       'social_account.connected',
       'social_account.reconnected',
     ]);

@@ -66,9 +66,13 @@ export function runProviderContractSuite(name: string, make: () => PublishingPro
     it('validates within capabilities and rejects over-long text', () => {
       const p = make();
       const caps = p.capabilities();
-      expect(p.validate(p.render(snapshot('ok'), account), account)).toEqual({ ok: true });
+      // Providers that require an image (Instagram) are validated with one attached.
+      const withImage = caps.imageRequired === true;
+      expect(p.validate(p.render(snapshot('ok', withImage), account), account)).toEqual({
+        ok: true,
+      });
       const tooLong = p.validate(
-        p.render(snapshot('x'.repeat(caps.maxTextLength + 1)), account),
+        p.render(snapshot('x'.repeat(caps.maxTextLength + 1), withImage), account),
         account,
       );
       expect(tooLong.ok).toBe(false);
@@ -98,6 +102,8 @@ export function runProviderContractSuite(name: string, make: () => PublishingPro
       expect(rendered.media).toHaveLength(1);
       const uploads: string[] = [];
       let loads = 0;
+      let urls = 0;
+      const urlDelivery = p.capabilities().image?.delivery === 'url';
       const result = await p.publish(
         {
           publicationId: 'pub-2',
@@ -114,6 +120,16 @@ export function runProviderContractSuite(name: string, make: () => PublishingPro
             loads += 1;
             return loaded;
           },
+          mediaUrl: async () => {
+            urls += 1;
+            return {
+              url: 'https://cdn.example/asset-1.jpg',
+              mimeType: 'image/jpeg',
+              width: 1080,
+              height: 1080,
+              byteSize: 1000,
+            };
+          },
           onMediaUploaded: async (assetId, ref) => {
             uploads.push(`${assetId}:${ref}`);
           },
@@ -121,14 +137,23 @@ export function runProviderContractSuite(name: string, make: () => PublishingPro
         ctx,
       );
       expect(result.kind).toBe('published');
-      expect(loads).toBe(1);
-      expect(uploads).toHaveLength(1);
-      expect(uploads[0]).toMatch(/^asset-1:.+/);
+      if (urlDelivery) {
+        // URL-delivery adapters never receive bytes; the engine hands them a public variant.
+        expect(urls).toBe(1);
+        expect(loads).toBe(0);
+      } else {
+        expect(loads).toBe(1);
+        expect(uploads).toHaveLength(1);
+        expect(uploads[0]).toMatch(/^asset-1:.+/);
+      }
     });
 
     it('publishes for an organization account with the same result vocabulary', async () => {
       const p = make();
-      const rendered = p.render(snapshot('page post'), organization);
+      const rendered = p.render(
+        snapshot('page post', p.capabilities().imageRequired === true),
+        organization,
+      );
       expect(p.validate(rendered, organization)).toEqual({ ok: true });
       const result = await p.publish(
         { publicationId: 'pub-org', account: organization, content: rendered },

@@ -9,7 +9,7 @@ import {
   webhookEvent,
 } from '../../src/infra/db/schema.js';
 import { runMaintenance } from '../../src/jobs/maintenance.job.js';
-import type { FakeProvider } from '../../src/modules/publishing/providers/fake/fake-provider.js';
+import type { FakeProvider } from '@postelyo/publishing-core';
 import { MAX_RECONCILE_ATTEMPTS } from '../../src/modules/publishing/reconciliation.service.js';
 import { NOTION_GOOD_DB, NOTION_VALID_TOKEN, createFakeProviders } from './fake-providers.js';
 import { createTestStack, locationOf, uniqueEmail, type TestStack } from './helpers.js';
@@ -378,6 +378,7 @@ describe('phase 1 hardening', () => {
         digest: stack.services.digest,
         heartbeat: stack.services.heartbeat,
         notionWebhooks: stack.services.notionWebhooks,
+        media: stack.services.media,
       },
       'maint-1',
       pino({ level: 'silent' }),

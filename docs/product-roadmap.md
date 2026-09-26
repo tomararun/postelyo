@@ -106,6 +106,8 @@ Do not add new platforms in this phase.
 
 ## Phase 2 – Multi-platform core
 
+**Status (2026-09-26).** Built and tested end to end against fakes: the `publishing-core` package, object storage and the media pipeline, the Notion contract extension with column-based results (the child-database alternative was not chosen), the X, Facebook Pages and Instagram adapters behind per-workspace flags, multiple accounts per provider, and one publication per target with an aggregated writeback. Details in [roadmap.md](./roadmap.md) Phase 2. Not verified live: X needs a paid API tier and app keys; Facebook and Instagram need Meta app review; production storage needs R2 credentials.
+
 **Goal.** One Notion page becomes several platform posts, each adapted, each independently tracked.
 
 **Platform order and why.**

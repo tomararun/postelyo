@@ -1,7 +1,7 @@
 # Postelyo – Roadmap
 
-Status: **Approved – Phase 0 tooling done, live pilot pending; Phase 1 hardening built**
-Created: 2026-09-21 · Updated: 2026-09-26 (Phase 1 items 2–7 of the product roadmap prompt built; pilot findings pending)
+Status: **Approved – Phase 0 tooling done, live pilot pending; Phase 1 hardening and Phase 2 multi-platform core built**
+Created: 2026-09-21 · Updated: 2026-09-26 (Phase 2 built; pilot findings and live verification of X/Meta pending)
 Related: [product-requirements.md](./product-requirements.md), [architecture.md](./architecture.md), [product-roadmap.md](./product-roadmap.md) (phase-by-phase product direction with build prompts)
 
 Phases are sequential by default; each phase ends with a usable product. Durations are rough and assume a small team (1–2 engineers). Nothing in a later phase requires rewriting the publishing engine; each row lists the architectural hook it relies on.
@@ -46,20 +46,23 @@ Goal: confidence to onboard external teams; prove the adapter pattern with a sec
 
 ---
 
-## Phase 2 – Native content workspace
+## Phase 2 – Multi-platform core (built 2026-09-26)
 
-Goal: Postelyo becomes the primary authoring surface; Notion becomes one source among several.
+Goal: one Notion page becomes several platform posts, each adapted, each independently tracked. The product-level plan is [product-roadmap.md](./product-roadmap.md) Phase 2; the native editor items that used to sit here moved to a later phase there.
 
-| Item | Notes | Hook |
-|------|-------|------|
-| Web app (`apps/web`, Next.js) | Replaces server-rendered admin pages | Thin HTTP layer; services unchanged |
-| Native editor | Writes canonical content directly; `content_source.kind = native` | Canonical content format §4 of domain model |
-| Content calendar | Views over `post`/`publication` by `scheduled_at` in workspace tz | Existing schema |
-| Content ideas | Dedicated Ideas feature (board, promotion to draft); replaces the Notion `Idea` status that the MVP simply maps to `draft` | New table, no publishing change |
-| Approval workflow enforcement | The states `in_review`, `changes_requested`, `ready` exist from the MVP (mirrored, unenforced). Phase 2 adds reviewers, permissions, blocked transitions and policies in the native editor | Post state machine (no new states needed); audit actor |
-| Collaboration | Comments, mentions, assignments on posts | New tables |
-| Media library | Object storage (S3/R2), processing, reuse across posts | `media_asset` + `content_hash` |
-| Instagram, Facebook adapters | Instagram requires media hosting (object storage from this phase) | Registry |
+| Item | Notes | Hook | Status |
+|------|-------|------|--------|
+| `packages/publishing-core` | Provider contract, canonical content, rendering helpers, registry, contract suite and all adapters extracted; api depends on it | §9.1, §15 | Done |
+| Object storage + media pipeline | `ObjectStorage` (local filesystem, S3-compatible/R2), `media_object` by content hash, `sharp` variants per provider `ImageSpec`, public URLs, `/media/*` for the local driver, pruning in maintenance | §9.3 media | Done |
+| Notion contract v1.1 | Optional `LinkedIn Text`, `X Text`, `Facebook Text`, `Instagram Caption`; `Platforms` options `X`, `Facebook Page`, `Instagram`; optional `Published URLs`; `Partially failed` status; post-level writeback | PRD §4.4 | Done |
+| X adapter | Text + one image (API v2, media upload), weighted length, OAuth 2.0 PKCE with refresh, `lookupRecent` | Registry, `social_account` refresh | Done · live verification needs a paid X API tier |
+| Facebook Pages adapter | Text + image by URL, Page tokens via Facebook Login, `lookupRecent` | Registry | Done · needs Meta app review |
+| Instagram adapter | Image required, container publish with status polling, JPEG variant within 4:5–1.91:1 | Registry, media pipeline | Done · needs Meta app review |
+| Multiple accounts per provider | Any number per provider; `<Platform>: <name>` picks one; Instagram accounts hang off their Page | `social_account.parent_account_id` | Done |
+| Per-workspace provider flags | `providers.{x,facebook,instagram}` in workspace settings; LinkedIn always on | `workspace.settings` | Done |
+| One publication per target | Independent failures, aggregated Notion status (`Partially failed`), one note line and one URL per platform | Existing schema | Done |
+
+Moved to the product roadmap's later phases: Next.js web app (Phase 3), native editor and collaboration (decision point 4), calendar/ideas/approval enforcement (Phase 4).
 
 ---
 

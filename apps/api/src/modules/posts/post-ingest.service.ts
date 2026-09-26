@@ -24,8 +24,10 @@ import {
   clearedWriteback,
   type DesiredWriteback,
 } from '../content-sources/notion/notion-writeback.js';
-import type { SocialAccountRef } from '../publishing/provider.js';
+import { accountRef } from '../publishing/engine.js';
+import type { AccountType } from '../publishing/provider.js';
 import type { ProviderRegistry } from '../publishing/registry.js';
+import { providerEnabled } from '../workspaces/settings.js';
 import { resolveSchedule } from '../scheduling/schedule-time.js';
 import type { TenantContext } from '../tenancy/tenant-context.js';
 import type { CanonicalContent, PostSnapshot } from './content.js';
@@ -39,16 +41,20 @@ import {
 } from './state-machine.js';
 
 type SocialProvider = SocialAccount['provider'];
-type AccountType = 'member' | 'organization';
 
 /**
- * Notion `Platforms` option → provider + account type. `LinkedIn Page` targets
- * the workspace's organization page; with several pages connected the option
- * `LinkedIn Page: <page name>` picks one (Phase 2 generalises this).
+ * Notion `Platforms` option → provider + account type. With several accounts
+ * of that kind connected, the option `<Platform>: <account name>` picks one
+ * (e.g. `LinkedIn Page: Acme`, `X: @alice`, `Instagram: @acme`).
  */
 const PLATFORM_TO_TARGET: Record<string, { provider: SocialProvider; accountType: AccountType }> = {
   linkedin: { provider: 'linkedin', accountType: 'member' },
   'linkedin page': { provider: 'linkedin', accountType: 'organization' },
+  x: { provider: 'x', accountType: 'member' },
+  twitter: { provider: 'x', accountType: 'member' },
+  facebook: { provider: 'facebook', accountType: 'page' },
+  'facebook page': { provider: 'facebook', accountType: 'page' },
+  instagram: { provider: 'instagram', accountType: 'business' },
 };
 
 /** A date this far in the past is still accepted and published immediately (PRD §4.5). */
@@ -74,7 +80,7 @@ export interface IngestResult {
 export interface IngestInput {
   ctx: TenantContext;
   source: Pick<ContentSource, 'id'>;
-  workspace: Pick<Workspace, 'id' | 'defaultTimezone' | 'defaultPublishTime'>;
+  workspace: Pick<Workspace, 'id' | 'defaultTimezone' | 'defaultPublishTime' | 'settings'>;
   page: SourcePost;
   /** Lazily loads the page body; only called when a snapshot is (re)taken. */
   loadBody: () => Promise<NotionBlock[]>;
@@ -122,7 +128,9 @@ export class PostIngestService {
     const issues: ValidationIssue[] = [];
     const warnings: string[] = [];
 
-    const targets = resolveTargets(page.platforms, input.accounts, issues);
+    const targets = resolveTargets(page.platforms, input.accounts, issues, (provider) =>
+      providerEnabled(input.workspace, provider),
+    );
 
     let schedule: ReturnType<typeof resolveSchedule> | null = null;
     if (!page.publishDate) {
@@ -462,7 +470,7 @@ export class PostIngestService {
     );
     const note = [
       result.anyBlocked
-        ? 'The LinkedIn connection needs re-authorization before this post can be published.'
+        ? 'A connected social account needs re-authorization before this post can be published.'
         : deferred?.lastErrorMessage
           ? deferred.lastErrorMessage
           : `Scheduled for ${sched.local} (${sched.timeZone}).`,
@@ -803,6 +811,7 @@ function resolveTargets(
   platforms: string[],
   accounts: SocialAccount[],
   issues: ValidationIssue[],
+  enabled: (provider: SocialProvider) => boolean = () => true,
 ): Target[] {
   const targets: Target[] = [];
   if (platforms.length === 0) {
@@ -822,10 +831,18 @@ function resolveTargets(
       });
       continue;
     }
+    if (!enabled(target.provider)) {
+      issues.push({
+        code: 'PLATFORM_DISABLED',
+        message: `${rawKey.trim()} is not enabled for this workspace yet. Ask your Postelyo admin to switch it on.`,
+        target: target.provider,
+      });
+      continue;
+    }
     const candidates = accounts.filter(
       (a) =>
         a.provider === target.provider &&
-        (a.accountType === 'organization') === (target.accountType === 'organization') &&
+        a.accountType === target.accountType &&
         !a.disconnectedAt &&
         (a.status === 'active' || a.status === 'needs_reauth'),
     );
@@ -855,17 +872,6 @@ function resolveTargets(
     targets.push({ provider: target.provider, account });
   }
   return targets;
-}
-
-function accountRef(a: SocialAccount): SocialAccountRef {
-  return {
-    id: a.id,
-    workspaceId: a.workspaceId,
-    provider: a.provider,
-    accountType: a.accountType === 'organization' ? 'organization' : 'member',
-    providerAccountId: a.providerAccountId,
-    displayName: a.displayName,
-  };
 }
 
 function guessMime(name: string): string | null {

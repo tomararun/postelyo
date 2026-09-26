@@ -7,8 +7,8 @@
     "node": ">=22 <23"
   },
   "scripts": {
-    "dev:api": "tsx watch --env-file-if-exists=../../.env src/main-api.ts",
-    "dev:worker": "tsx watch --env-file-if-exists=../../.env src/main-worker.ts",
+    "dev:api": "tsx --conditions=development watch --env-file-if-exists=../../.env src/main-api.ts",
+    "dev:worker": "tsx --conditions=development watch --env-file-if-exists=../../.env src/main-worker.ts",
     "build": "tsc -p tsconfig.build.json",
     "start:api": "node dist/main-api.js",
     "start:worker": "node dist/main-worker.js",
@@ -17,16 +17,19 @@
     "test:watch": "vitest",
     "test:integration": "cross-env VITEST_INTEGRATION=1 vitest run",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx --env-file-if-exists=../../.env src/infra/db/migrate.ts",
+    "db:migrate": "tsx --conditions=development --env-file-if-exists=../../.env src/infra/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
-    "preflight": "tsx --env-file-if-exists=../../.env src/tools/preflight.ts",
-    "notion:template": "tsx --env-file-if-exists=../../.env src/tools/create-notion-template.ts",
-    "seed": "tsx --env-file-if-exists=../../.env src/tools/seed.ts"
+    "preflight": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/preflight.ts",
+    "notion:template": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/create-notion-template.ts",
+    "seed": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1141.0",
+    "@aws-sdk/s3-request-presigner": "^3.1141.0",
     "@fastify/formbody": "^8.0.2",
     "@fastify/helmet": "^13.1.1",
     "@fastify/sensible": "^6.0.5",
+    "@postelyo/publishing-core": "0.1.0",
     "@sentry/node": "^10.75.3",
     "better-auth": "^1.7.5",
     "drizzle-orm": "^0.45.3",
@@ -35,6 +38,7 @@
     "pg-boss": "^12.33.3",
     "pino": "^10.3.1",
     "postgres": "^3.4.9",
+    "sharp": "^0.35.4",
     "zod": "^4.6.5"
   },
   "devDependencies": {

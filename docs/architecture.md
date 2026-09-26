@@ -395,8 +395,17 @@ type PublishResult =
 Rules for adapters:
 - Adapters are **pure I/O translators**: no database access, no state transitions. They receive decrypted credentials via `ProviderContext` for the duration of the call only.
 - Adapters classify every outcome into exactly one of the four `PublishResult` kinds. The engine never inspects provider-specific errors.
-- Adapters live in their own module folder and are registered in a `ProviderRegistry`. Adding X means adding a folder and one registry line.
+- Adapters live in `packages/publishing-core/src/providers/<id>/` (Phase 2) next to the contract, the canonical content types, the rendering helpers and the contract test suite (`@postelyo/publishing-core/contract-suite`). The api depends on the package; adding a platform means adding a folder there, passing the contract suite and adding one registry line in `services.ts`.
 - A `FakeProvider` implements the same interface for local dev and tests with scripted outcomes.
+
+Phase 2 additions to the contract:
+- `ProviderCapabilities.image: ImageSpec` declares how the adapter takes images: `upload` (bytes through `loadMedia`, LinkedIn and X) or `url` (a public URL of a derived variant through `mediaUrl`, Facebook and Instagram), plus output type, width bounds and aspect range. `imageRequired` marks Instagram.
+- `CanonicalContent.platformText` carries per-platform plain-text overrides by provider id; `contentForProvider()` returns the content an adapter should render (override or shared body). Media stays shared.
+- `AccountType` is `member | organization | page | business`.
+
+### 9.1a Media pipeline (Phase 2)
+
+fetch (SSRF-guarded) → validate (type, size, dimensions) → store once per workspace and content hash in object storage (`media_object`, key `ws/<workspace>/<sha256>.<ext>`) → at publish time either hand bytes to `upload` adapters (from storage, no second download) or derive a variant for `url` adapters with `sharp` (centre-crop toward the nearest allowed aspect, clamp width, convert to JPEG) → public URL valid for an hour. `ObjectStorage` has two drivers: `local` (files under `STORAGE_LOCAL_DIR`, served by the api at `/media/<key>`, keys are unguessable hashes) and `s3` (R2/MinIO/AWS; public base URL or presigned GET). Maintenance deletes objects no asset references after seven days. Provider upload refs remain cached per asset and hash.
 
 ### 9.2 Publish engine (job handler)
 
@@ -429,6 +438,13 @@ Lease expiry: a sweeper marks `publishing` rows whose lease expired **without** 
 - Images: initialize upload (`POST /rest/images?action=initializeUpload`), `PUT` bytes to the returned upload URL, then reference the image URN. The upload is a separate idempotent step keyed by media content hash so retries do not re-upload.
 - Rendering: Notion rich text → plain text with paragraph breaks; links kept as URLs; mentions/hashtags passed through; reserved characters escaped.
 - Classification: `429` → retryable `rate_limit` with `Retry-After` (default 15 min), which the engine treats as a wait that does not consume an attempt; `5xx`/network/timeouts before response → `ambiguous` if the request was sent, else retryable; `401/403` → terminal `auth`; `422/400` → terminal `content`.
+
+### 9.3a X, Facebook Pages and Instagram adapters (Phase 2; verify against current docs)
+
+- **X**: OAuth 2.0 user context with PKCE, confidential client (Basic auth on the token endpoint), scopes `tweet.read tweet.write users.read media.write offline.access`. Access tokens last ~2 h: `SocialAccountService.withAccessToken` refreshes when a refresh token is stored and the token expires within 5 minutes (audited as `social_account.token_refreshed`). Publish: `POST /2/media/upload` (multipart, `tweet_image`) then `POST /2/tweets`; 280 weighted characters (URLs count 23); 429 → `rate_limit` with `x-rate-limit-reset`; 403 "duplicate" → content error; 5xx on the tweet call → ambiguous. Lookup: `GET /2/users/:id/tweets`. Posting needs a paid API tier.
+- **Facebook Pages**: Facebook Login, long-lived user token → Page tokens from `GET /me/accounts` (these do not expire); each Page is a `facebook`/`page` account. Publish: `POST /{page}/feed` (text) or `POST /{page}/photos` with `url` (image by public URL). Graph error codes: 190 auth; 4/17/32/613 rate limit; 10/200–299/803 permission; 100 content. Lookup: `GET /{page}/feed`. Needs app review for `pages_manage_posts`.
+- **Instagram**: the professional account linked to a Page (`instagram_business_account`) becomes an `instagram`/`business` account that hangs off the Page (`parent_account_id`) and shares its token. Publish: `POST /{ig}/media` (container from `image_url` + caption) → poll `status_code` until `FINISHED` → `POST /{ig}/media_publish` (the only non-idempotent call) → permalink. Image required, JPEG, width 320–1440, aspect 4:5 to 1.91:1: the media pipeline derives a conforming variant. Needs app review for `instagram_content_publish`.
+- All three are behind per-workspace flags (`workspace.settings.providers`) and server app credentials; ingest reports `PLATFORM_DISABLED` otherwise.
 
 ### 9.4 Idempotency summary
 
@@ -755,3 +771,7 @@ Explicitly **not** done in the MVP: microservices, event bus, multi-region, Kube
 | D20 (2026-09-26) | Reconciliation resolves only on exactly one fingerprint match in a time window, max 3 checks | Resolve on "any post at that time"; retry after N misses | Duplicate posts remain the top risk; a miss still goes to the operator with the evidence recorded. |
 | D21 (2026-09-26) | Daily cap counted from `publication` rows (24 h rolling) rather than a usage table | `account_usage` table | Nothing new to keep consistent; the publication table already holds the facts. |
 | D22 (2026-09-26) | Rate limits are waits that keep the attempt budget | Count as attempts; terminal `rate_limit_daily` | A throttled post is not a failed post; waiting up to 24 h then publishing late matches P3. |
+| D23 (2026-09-26) | Results for multi-target pages stay in the existing system columns: aggregated `Postelyo Status` (incl. `Partially failed`), one note line per target, optional `Published URLs` | Results child database per page | No extra API calls per sync, no permission friction, additive to v1 databases. |
+| D24 (2026-09-26) | Media stored once per workspace and content hash; variants derived per provider spec; local driver served by the api | Store per asset; stream from Notion at publish time | Instagram needs public URLs; hashing dedupes and makes retries cheap; the local driver keeps development Docker-free. |
+| D25 (2026-09-26) | Adapters live in the `publishing-core` package, resolved from source in dev/tests (`development` export condition) and from `dist` in production | Keep adapters in the api | Independent contract testing and future external contributions without a build step in the inner loop. |
+| D26 (2026-09-26) | Meta connect imports every managed Page and its Instagram account; X connects one profile per callback; any number of accounts per provider | One-per-provider rule | Agencies manage many Pages; the Notion `Platforms` option selects the target. |

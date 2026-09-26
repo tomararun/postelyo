@@ -42,7 +42,7 @@ export default tseslint.config(
   },
   // Architecture boundary: provider adapters see only the publishing contract.
   {
-    files: ['apps/api/src/modules/publishing/providers/**/*.ts'],
+    files: ['packages/publishing-core/src/providers/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -54,7 +54,8 @@ export default tseslint.config(
             },
             {
               group: ['../../../**'],
-              message: 'providers may only import from modules/publishing (provider.ts types)',
+              message:
+                'providers may only import from the publishing-core package root (provider.ts, render.ts)',
             },
           ],
         },

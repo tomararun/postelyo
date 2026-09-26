@@ -1,6 +1,12 @@
 import { eq, sql } from 'drizzle-orm';
 import type { Db } from '../../../infra/db/client.js';
-import { contentSource, post, publication, type Publication } from '../../../infra/db/schema.js';
+import {
+  contentSource,
+  post,
+  publication,
+  socialAccount,
+  type Publication,
+} from '../../../infra/db/schema.js';
 import type { Logger } from '../../../infra/logger.js';
 import type { Clock } from '../../../shared/clock.js';
 import { formatLocal } from '../../scheduling/schedule-time.js';
@@ -50,7 +56,17 @@ export class ResultWritebackService {
       return this.markDone(pub.id, 'skipped');
     }
 
-    const desired = desiredFor(pub);
+    // Several publications share one page (Phase 2): the writeback describes all of them.
+    const siblings = await db
+      .select({ pub: publication, accountName: socialAccount.displayName })
+      .from(publication)
+      .leftJoin(socialAccount, eq(socialAccount.id, publication.socialAccountId))
+      .where(eq(publication.postId, pub.postId))
+      .orderBy(publication.createdAt);
+    const desired =
+      siblings.length > 1
+        ? desiredForPost(siblings.map((s) => ({ ...s.pub, accountName: s.accountName })))
+        : desiredFor(pub);
     if (!desired) return this.markDone(pub.id, 'skipped');
 
     const ctx = systemContext(pub.workspaceId, 'writeback', correlationId);
@@ -183,4 +199,105 @@ export function desiredFor(pub: Publication): DesiredWriteback | null {
     default:
       return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Post-level aggregation (Phase 2): several publications share one Notion page.
+// ---------------------------------------------------------------------------
+
+type PubWithAccount = Publication & { accountName: string | null };
+
+const PROVIDER_LABEL: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  x: 'X',
+  facebook: 'Facebook',
+  instagram: 'Instagram',
+  fake: 'Fake',
+};
+
+export function publicationLabel(
+  p: Pick<Publication, 'provider'> & { accountName: string | null },
+) {
+  const provider = PROVIDER_LABEL[p.provider] ?? p.provider;
+  return p.accountName ? `${provider} (${p.accountName})` : provider;
+}
+
+/** One line per publication for the note. */
+function lineFor(p: PubWithAccount): string {
+  const at = (d: Date | null) => (d ? `${formatLocal(d, p.scheduledTz)} (${p.scheduledTz})` : '');
+  switch (p.state) {
+    case 'published':
+      return `${publicationLabel(p)}: published ${at(p.publishedAt)}${(p.delaySeconds ?? 0) > LATE_THRESHOLD_SECONDS ? `, ${Math.round((p.delaySeconds ?? 0) / 60)} min late` : ''}.`;
+    case 'failed':
+      return `${publicationLabel(p)}: failed: ${p.lastErrorMessage ?? p.lastErrorCode ?? 'unknown error'}`;
+    case 'ambiguous':
+      return `${publicationLabel(p)}: needs review (the provider did not confirm the post).`;
+    case 'retry_wait':
+      return `${publicationLabel(p)}: ${p.lastErrorCode === 'rate_limited' ? 'waiting for the posting limit' : 'temporary problem, retrying'}${p.nextAttemptAt ? ` at ${at(p.nextAttemptAt)}` : ''}.`;
+    case 'queued':
+    case 'publishing':
+      return `${publicationLabel(p)}: publishing…`;
+    case 'blocked':
+      return `${publicationLabel(p)}: waiting for re-authorization.`;
+    case 'scheduled':
+      return `${publicationLabel(p)}: ${p.lastErrorCode === 'daily_cap' && p.lastErrorMessage ? p.lastErrorMessage : `scheduled for ${p.scheduledLocal} (${p.scheduledTz})`}`;
+    case 'cancelled':
+      return `${publicationLabel(p)}: cancelled.`;
+    default:
+      return `${publicationLabel(p)}: ${p.state}.`;
+  }
+}
+
+/**
+ * Aggregated status for a page with several targets: any in flight → Publishing;
+ * any ambiguous → Needs review; all done and all published → Published (late if any was);
+ * published + failed → Partially failed; all failed → Failed; otherwise the
+ * pre-publish states are the sync's business (null).
+ */
+export function desiredForPost(pubs: PubWithAccount[]): DesiredWriteback | null {
+  const live = pubs.filter((p) => p.state !== 'cancelled');
+  if (live.length === 0) return null;
+  const states = new Set(live.map((p) => p.state));
+  const inFlight = ['queued', 'publishing', 'retry_wait'].some((s) =>
+    states.has(s as Publication['state']),
+  );
+  const published = live.filter((p) => p.state === 'published');
+  const failed = live.filter((p) => p.state === 'failed');
+  const waiting = live.filter(
+    (p) => p.state === 'scheduled' || p.state === 'blocked' || p.state === 'pending',
+  );
+  const deferred = waiting.some((p) => p.lastErrorCode === 'daily_cap' && p.deferredUntil);
+  let status: DesiredWriteback['postelyoStatus'];
+  if (states.has('ambiguous')) status = POSTELYO_STATUS.needsReview;
+  else if (inFlight) status = POSTELYO_STATUS.publishing;
+  else if (waiting.length > 0 && published.length === 0 && failed.length === 0) {
+    if (!deferred) return null;
+    status = POSTELYO_STATUS.scheduled;
+  } else if (waiting.length > 0) status = POSTELYO_STATUS.publishing;
+  else if (failed.length === live.length) status = POSTELYO_STATUS.failed;
+  else if (failed.length > 0) status = POSTELYO_STATUS.partiallyFailed;
+  else
+    status = published.some((p) => (p.delaySeconds ?? 0) > LATE_THRESHOLD_SECONDS)
+      ? POSTELYO_STATUS.publishedLate
+      : POSTELYO_STATUS.published;
+
+  const note = live.map(lineFor).join('\n');
+  const first = published
+    .slice()
+    .sort((a, b) => (a.publishedAt?.getTime() ?? 0) - (b.publishedAt?.getTime() ?? 0))[0];
+  const done = waiting.length === 0 && !inFlight;
+  return {
+    postelyoStatus: status,
+    postelyoNote: note,
+    postelyoId: live.map((p) => p.id).join(','),
+    ...(done
+      ? {
+          publishedUrl: published.find((p) => p.providerPostUrl)?.providerPostUrl ?? null,
+          publishedAt: first?.publishedAt ? first.publishedAt.toISOString() : null,
+          publishedUrls: published
+            .filter((p) => p.providerPostUrl)
+            .map((p) => ({ label: publicationLabel(p), url: p.providerPostUrl! })),
+        }
+      : {}),
+  };
 }

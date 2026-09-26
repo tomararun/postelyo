@@ -1,6 +1,7 @@
-import { contentToPlainText, textFingerprint } from '../../render.js';
+import { contentForProvider, contentToPlainText, textFingerprint } from '../../render.js';
 import type {
   LoadedMedia,
+  MediaUrl,
   PostSnapshot,
   ProviderCapabilities,
   ProviderContext,
@@ -21,6 +22,8 @@ export interface FakeProviderOptions {
   capabilities?: Partial<ProviderCapabilities>;
   /** Simulated latency per call. */
   latencyMs?: number;
+  /** Provider id whose per-platform text override the fake should honour (default: `fake`). */
+  renderAs?: string;
 }
 
 export interface FakeCall {
@@ -30,6 +33,8 @@ export interface FakeCall {
   /** Media the fake "uploaded" during this call (reused refs are not re-uploaded). */
   uploaded: { assetId: string; byteSize: number; contentHash: string; ref: string }[];
   reusedRefs: string[];
+  /** Public variant URLs resolved during this call (url-delivery fakes). */
+  urls: ({ assetId: string } & MediaUrl)[];
 }
 
 /**
@@ -91,10 +96,16 @@ export class FakeProvider implements PublishingProvider {
     };
   }
 
-  render(post: PostSnapshot): RenderedContent {
+  render(post: PostSnapshot, account?: SocialAccountRef): RenderedContent {
+    // As the fallback for every provider in PROVIDER_MODE=fake, render the override of the
+    // account's real provider so per-platform text is exercised end to end.
+    const content = contentForProvider(
+      post.content,
+      this.opts.renderAs ?? account?.provider ?? this.id,
+    );
     return {
-      text: contentToPlainText(post.content),
-      media: post.content.media.map((m) => ({
+      text: contentToPlainText(content),
+      media: content.media.map((m) => ({
         assetId: m.assetId,
         mimeType: 'image/png',
         byteSize: 0,
@@ -150,11 +161,28 @@ export class FakeProvider implements PublishingProvider {
       result: { kind: 'ambiguous', reason: 'not decided' },
       uploaded: [],
       reusedRefs: [],
+      urls: [],
     };
     this.calls.push(call);
 
-    // Media: mirror a real adapter — reuse cached refs, otherwise load and "upload".
+    // Media: mirror a real adapter — reuse cached refs, otherwise load and "upload";
+    // url-delivery fakes ask the engine for a public variant instead.
+    const spec = this.capabilities().image;
     for (const m of input.content.media) {
+      if (spec?.delivery === 'url') {
+        if (!input.mediaUrl) continue;
+        try {
+          const resolved = await input.mediaUrl(m.assetId, spec);
+          call.urls.push({ assetId: m.assetId, ...resolved });
+        } catch (err) {
+          call.result = {
+            kind: 'retryable_error',
+            reason: `media url failed: ${(err as Error).message}`,
+          };
+          return call.result;
+        }
+        continue;
+      }
       if (m.providerRef) {
         call.reusedRefs.push(m.providerRef);
         continue;

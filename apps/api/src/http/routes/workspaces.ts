@@ -15,6 +15,14 @@ const patchSchema = z
     defaultPublishTime: z.string().optional(),
     dailyCapPerAccount: z.number().nullable().optional(),
     notionWebhooks: z.boolean().optional(),
+    providers: z
+      .object({
+        x: z.boolean().optional(),
+        facebook: z.boolean().optional(),
+        instagram: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
   })
   .strict();
 
@@ -31,6 +39,12 @@ function toDto(w: Workspace) {
     dailyCapPerAccount: dailyCapFor(w),
     dailyCapIsDefault: settings.dailyCapPerAccount === undefined,
     notionWebhooks: settings.notionWebhooks === true,
+    providers: {
+      linkedin: true,
+      x: settings.providers?.x === true,
+      facebook: settings.providers?.facebook === true,
+      instagram: settings.providers?.instagram === true,
+    },
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
   };

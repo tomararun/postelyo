@@ -51,7 +51,15 @@ function notionProps(broken: boolean): Record<string, unknown> {
     Platforms: {
       id: 'pl',
       type: 'multi_select',
-      multi_select: { options: [{ name: 'LinkedIn' }, { name: 'LinkedIn Page' }] },
+      multi_select: {
+        options: [
+          { name: 'LinkedIn' },
+          { name: 'LinkedIn Page' },
+          { name: 'X' },
+          { name: 'Facebook Page' },
+          { name: 'Instagram' },
+        ],
+      },
     },
     'Post Text': { id: 'pt', type: 'rich_text', rich_text: {} },
     Media: { id: 'md', type: 'files', files: {} },
@@ -60,6 +68,9 @@ function notionProps(broken: boolean): Record<string, unknown> {
     'Published URL': { id: 'pu', type: 'url', url: {} },
     'Published At': { id: 'pa', type: 'date', date: {} },
     'Postelyo ID': { id: 'pi', type: 'rich_text', rich_text: {} },
+    'Published URLs': { id: 'pus', type: 'rich_text', rich_text: {} },
+    'X Text': { id: 'xt', type: 'rich_text', rich_text: {} },
+    'Instagram Caption': { id: 'ic', type: 'rich_text', rich_text: {} },
   };
   if (broken) {
     delete props['Publish Date'];
@@ -89,16 +100,19 @@ export interface FakeNotionPageInput {
   media?: FakeMediaInput[];
   timeZone?: string | null;
   archived?: boolean;
+  /** Per-platform text overrides keyed by Notion property name (e.g. 'X Text'). */
+  platformText?: Record<string, string>;
 }
 
 interface FakeNotionPage extends Required<
-  Omit<FakeNotionPageInput, 'publishDate' | 'status' | 'timeZone' | 'media'>
+  Omit<FakeNotionPageInput, 'publishDate' | 'status' | 'timeZone' | 'media' | 'platformText'>
 > {
   id: string;
   status: string | null;
   publishDate: { start: string; timeZone?: string | null } | null;
   timeZone: string | null;
   media: FakeMediaInput[];
+  platformText: Record<string, string>;
   lastEditedTime: string;
   system: {
     postelyoStatus: string | null;
@@ -106,6 +120,7 @@ interface FakeNotionPage extends Required<
     publishedUrl: string | null;
     publishedAt: string | null;
     postelyoId: string;
+    publishedUrls: string;
   };
 }
 
@@ -150,6 +165,7 @@ export class FakeNotion {
       postText: input.postText ?? prev?.postText ?? '',
       body: input.body ?? prev?.body ?? [],
       media: input.media ?? prev?.media ?? [],
+      platformText: input.platformText ?? prev?.platformText ?? {},
       timeZone: input.timeZone !== undefined ? input.timeZone : (prev?.timeZone ?? null),
       archived: input.archived ?? prev?.archived ?? false,
       lastEditedTime: this.tick(),
@@ -159,6 +175,7 @@ export class FakeNotion {
         publishedUrl: null,
         publishedAt: null,
         postelyoId: '',
+        publishedUrls: '',
       },
     };
     this.pages.set(id, page);
@@ -217,6 +234,13 @@ export class FakeNotion {
           date: p.system.publishedAt ? { start: p.system.publishedAt } : null,
         },
         'Postelyo ID': { type: 'rich_text', rich_text: rt(p.system.postelyoId) },
+        'Published URLs': { type: 'rich_text', rich_text: rt(p.system.publishedUrls) },
+        ...Object.fromEntries(
+          Object.entries(p.platformText).map(([name, text]) => [
+            name,
+            { type: 'rich_text', rich_text: rt(text) },
+          ]),
+        ),
       },
     };
   }
@@ -324,6 +348,9 @@ export class FakeNotion {
             case 'Published At':
               p.system.publishedAt = (value['date'] as { start?: string } | null)?.start ?? null;
               break;
+            case 'Published URLs':
+              p.system.publishedUrls = plain(value['rich_text']);
+              break;
           }
         }
         p.lastEditedTime = this.tick();
@@ -420,6 +447,23 @@ export function createFakeProviders() {
   /** Elements returned by the Posts API author finder. */
   const recentPosts: Record<string, unknown>[] = [];
   const linkedInUploads: { url: string; byteLength: number }[] = [];
+  /** Refresh tokens presented to the X token endpoint. */
+  const xRefreshes: string[] = [];
+  let metaPagesStatus = 200;
+  const metaPages: Record<string, unknown>[] = [
+    {
+      id: 'page-1',
+      name: 'Acme Page',
+      access_token: 'PAGE-TOKEN-1',
+      picture: { data: { url: 'https://media.example/page-1.jpg' } },
+      instagram_business_account: {
+        id: 'ig-1',
+        username: 'acme',
+        profile_picture_url: 'https://media.example/ig-1.jpg',
+      },
+    },
+    { id: 'page-2', name: 'Other Page', access_token: 'PAGE-TOKEN-2' },
+  ];
 
   const fetchImpl = fakeFetch((url, init) => {
     const headers = Object.fromEntries(
@@ -501,6 +545,56 @@ export function createFakeProviders() {
       });
     }
 
+    // --- X OAuth 2.0 (PKCE) + identity ---
+    if (url === 'https://api.x.com/2/oauth2/token') {
+      const params = new URLSearchParams(body);
+      if (!(headers['authorization'] ?? '').startsWith('Basic '))
+        return json(401, { error: 'unauthorized_client' });
+      if (params.get('grant_type') === 'refresh_token') {
+        xRefreshes.push(params.get('refresh_token') ?? '');
+        return json(200, {
+          access_token: `XAT-refreshed-${xRefreshes.length}`,
+          refresh_token: `XRT-${xRefreshes.length + 1}`,
+          expires_in: 7200,
+          scope: 'tweet.read tweet.write users.read media.write offline.access',
+        });
+      }
+      if (params.get('code') === 'x-good' && params.get('code_verifier')) {
+        return json(200, {
+          access_token: 'XAT-1',
+          refresh_token: 'XRT-1',
+          expires_in: 7200,
+          scope: 'tweet.read tweet.write users.read media.write offline.access',
+        });
+      }
+      return json(400, { error: 'invalid_request', error_description: 'bad code' });
+    }
+    if (url.startsWith('https://api.x.com/2/users/me')) {
+      return json(200, {
+        data: {
+          id: 'x-user-1',
+          username: 'alice',
+          name: 'Alice X',
+          profile_image_url: 'https://media.example/alice.jpg',
+        },
+      });
+    }
+
+    // --- Meta (Facebook Login) ---
+    if (url.startsWith('https://graph.facebook.com/v21.0/oauth/access_token')) {
+      const q = new URL(url).searchParams;
+      if (q.get('grant_type') === 'fb_exchange_token')
+        return json(200, { access_token: 'META-LONG', expires_in: 5184000 });
+      if (q.get('code') === 'meta-good')
+        return json(200, { access_token: 'META-SHORT', expires_in: 3600 });
+      return json(400, { error: { code: 100, message: 'Invalid verification code format.' } });
+    }
+    if (url.startsWith('https://graph.facebook.com/v21.0/me/accounts')) {
+      if (metaPagesStatus !== 200)
+        return json(metaPagesStatus, { error: { code: 200, message: 'Requires pages_show_list' } });
+      return json(200, { data: metaPages });
+    }
+
     // --- Notion API ---
     if (url.startsWith('https://api.notion.com/')) {
       if (headers['authorization'] !== `Bearer ${NOTION_VALID_TOKEN}`) {
@@ -567,5 +661,9 @@ export function createFakeProviders() {
       organizations = list;
     },
     recentPosts,
+    xRefreshes,
+    setMetaPagesStatus: (s: number) => {
+      metaPagesStatus = s;
+    },
   };
 }

@@ -12,7 +12,7 @@ import type {
   SocialAccountRef,
   ValidationResult,
 } from '../../provider.js';
-import { textFingerprint } from '../../render.js';
+import { contentForProvider, textFingerprint } from '../../render.js';
 import { renderLittleText, unescapeLittleText } from './little-text.js';
 
 /**
@@ -63,11 +63,12 @@ export class LinkedInProvider implements PublishingProvider {
   }
 
   render(post: PostSnapshot, _account: SocialAccountRef): RenderedContent {
-    const { text, plainText } = renderLittleText(post.content);
+    const content = contentForProvider(post.content, this.id);
+    const { text, plainText } = renderLittleText(content);
     return {
       text,
       plainText,
-      media: post.content.media.map((m) => ({
+      media: content.media.map((m) => ({
         assetId: m.assetId,
         mimeType: 'image/png',
         byteSize: 0,

@@ -5,7 +5,12 @@ import { withTenantScope } from '../../infra/db/tenant-scope.js';
 import { uuidv7 } from '../../shared/ids.js';
 import { recordAudit } from '../audit/audit.js';
 import type { Role, TenantContext } from '../tenancy/tenant-context.js';
-import { MAX_DAILY_CAP_PER_ACCOUNT, readSettings, type WorkspaceSettings } from './settings.js';
+import {
+  MAX_DAILY_CAP_PER_ACCOUNT,
+  readSettings,
+  type FlaggedProvider,
+  type WorkspaceSettings,
+} from './settings.js';
 import { slugSuffix, workspaceDefaultsFromEmail } from './slug.js';
 import { PUBLISH_TIME_RE, isValidTimeZone } from './timezone.js';
 
@@ -30,6 +35,8 @@ export interface WorkspacePatch {
   /** Posts per social account per rolling 24 h; null restores the default. */
   dailyCapPerAccount?: number | null | undefined;
   notionWebhooks?: boolean | undefined;
+  /** Per-platform flags (Phase 2); merged into the existing map. */
+  providers?: Partial<Record<FlaggedProvider, boolean | undefined>> | undefined;
 }
 
 const DEFAULT_TIMEZONE = 'UTC';
@@ -192,7 +199,11 @@ export class WorkspaceService {
         .limit(1)
         .for('update');
       if (!before) throw new Error(`workspace ${ctx.workspaceId} not found for tenant context`);
-      if (patch.dailyCapPerAccount !== undefined || patch.notionWebhooks !== undefined) {
+      if (
+        patch.dailyCapPerAccount !== undefined ||
+        patch.notionWebhooks !== undefined ||
+        patch.providers !== undefined
+      ) {
         // Unknown keys are kept; known keys are replaced or removed explicitly.
         const merged: Record<string, unknown> = { ...(before.settings as Record<string, unknown>) };
         const settings: WorkspaceSettings = { ...readSettings(before) };
@@ -203,6 +214,13 @@ export class WorkspaceService {
           settings.dailyCapPerAccount = patch.dailyCapPerAccount;
         }
         if (patch.notionWebhooks !== undefined) settings.notionWebhooks = patch.notionWebhooks;
+        if (patch.providers !== undefined) {
+          const providers = { ...(settings.providers ?? {}) };
+          for (const [k, v] of Object.entries(patch.providers)) {
+            if (typeof v === 'boolean') providers[k as FlaggedProvider] = v;
+          }
+          settings.providers = providers;
+        }
         values.settings = { ...merged, ...settings };
       }
       const [after] = await tx
@@ -222,6 +240,15 @@ export class WorkspaceService {
         if (settingsBefore[k] !== settingsAfter[k]) {
           changed[k] = { from: settingsBefore[k] ?? null, to: settingsAfter[k] ?? null };
         }
+      }
+      if (
+        JSON.stringify(settingsBefore.providers ?? {}) !==
+        JSON.stringify(settingsAfter.providers ?? {})
+      ) {
+        changed['providers'] = {
+          from: settingsBefore.providers ?? {},
+          to: settingsAfter.providers ?? {},
+        };
       }
       await recordAudit(tx, {
         workspaceId: ctx.workspaceId,

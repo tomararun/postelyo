@@ -12,6 +12,7 @@ import {
 } from '../../modules/content-sources/content-source.service.js';
 import type { NotionSyncService } from '../../modules/content-sources/notion/notion-sync.service.js';
 import type { HeartbeatService } from '../../modules/ops/heartbeat.service.js';
+import { providerEnabled } from '../../modules/workspaces/settings.js';
 import type { WorkspaceService } from '../../modules/workspaces/workspace.service.js';
 import { loadUser, sameOriginGuard } from '../plugins/auth.js';
 import { requireMembership } from '../plugins/tenancy.js';
@@ -25,6 +26,8 @@ export interface PagesOptions {
   heartbeat: HeartbeatService;
   appBaseUrl: string;
   linkedinConfigured: boolean;
+  xConfigured: boolean;
+  metaConfigured: boolean;
   providerMode: 'fake' | 'live';
 }
 
@@ -162,8 +165,20 @@ export const pageRoutes: FastifyPluginAsync<PagesOptions> = async (app, opts) =>
     const canManage =
       ctx.actor.type === 'user' && (ctx.actor.role === 'owner' || ctx.actor.role === 'admin');
     const activeAccounts = accounts.filter((a) => !a.disconnectedAt);
-    const profiles = activeAccounts.filter((a) => a.accountType === 'member');
-    const pages = activeAccounts.filter((a) => a.accountType === 'organization');
+    const profiles = activeAccounts.filter(
+      (a) => a.provider === 'linkedin' && a.accountType === 'member',
+    );
+    const pages = activeAccounts.filter(
+      (a) => a.provider === 'linkedin' && a.accountType === 'organization',
+    );
+    const xAccounts = activeAccounts.filter((a) => a.provider === 'x');
+    const fbAccounts = activeAccounts.filter((a) => a.provider === 'facebook');
+    const igAccounts = activeAccounts.filter((a) => a.provider === 'instagram');
+    const flags = {
+      x: providerEnabled(ws, 'x'),
+      facebook: providerEnabled(ws, 'facebook'),
+      instagram: providerEnabled(ws, 'instagram'),
+    };
     const activeSources = sources.filter((s) => !s.disconnectedAt);
     const base = `/w/${ws.id}/connections`;
     const accountRows = (rows: typeof activeAccounts) =>
@@ -229,6 +244,8 @@ export const pageRoutes: FastifyPluginAsync<PagesOptions> = async (app, opts) =>
           }
           ${connected === 'linkedin' ? html`<p class="notice">LinkedIn profile connected.</p>` : null}
           ${connected === 'linkedin-pages' ? html`<p class="notice">LinkedIn Pages connected. Disconnect any you do not want Postelyo to post to.</p>` : null}
+          ${connected === 'x' ? html`<p class="notice">X profile connected.</p>` : null}
+          ${connected === 'meta' ? html`<p class="notice">Facebook Pages and linked Instagram accounts connected. Disconnect any you do not want Postelyo to post to.</p>` : null}
           ${notice ? html`<p class="notice">${notice}</p>` : null}
           ${error ? html`<p class="notice error">${error}</p>` : null}
 
@@ -267,6 +284,48 @@ export const pageRoutes: FastifyPluginAsync<PagesOptions> = async (app, opts) =>
                   <small>Requires Community Management API access for this app.</small>
                 </p>`
               : null
+          }
+
+          <h3>X</h3>
+          ${
+            !flags.x
+              ? html`<p><small>Not enabled for this workspace.</small></p>`
+              : html`${xAccounts.length === 0 ? html`<p>No X profile connected.</p>` : accountTable(xAccounts, 'Profile')}
+                ${
+                  canManage
+                    ? opts.xConfigured
+                      ? html`<p>
+                          <a href="/v1/workspaces/${ws.id}/social-accounts/x/connect"
+                            >${xAccounts.length === 0 ? 'Connect X profile' : 'Connect another X profile'}</a
+                          >
+                        </p>`
+                      : html`<p class="notice error">
+                          X is not configured on this server (X_CLIENT_ID).
+                        </p>`
+                    : null
+                }`
+          }
+
+          <h3>Facebook Pages and Instagram</h3>
+          ${
+            !flags.facebook && !flags.instagram
+              ? html`<p><small>Not enabled for this workspace.</small></p>`
+              : html`${fbAccounts.length === 0 ? html`<p>No Facebook Page connected.</p>` : accountTable(fbAccounts, 'Page')}
+                ${igAccounts.length === 0 ? html`<p>No Instagram account connected (link one to a Page in Meta Business Suite).</p>` : accountTable(igAccounts, 'Instagram')}
+                ${
+                  canManage
+                    ? opts.metaConfigured
+                      ? html`<p>
+                          <a href="/v1/workspaces/${ws.id}/social-accounts/meta/connect"
+                            >${fbAccounts.length === 0 ? 'Connect Facebook Pages you manage' : 'Reconnect Pages (refresh authorization)'}</a
+                          >
+                          <small>Requires Meta app review for publishing permissions.</small>
+                        </p>`
+                      : html`<p class="notice error">
+                          Facebook is not configured on this server (META_APP_ID).
+                        </p>`
+                    : null
+                }`
           }
 
           <h3>Notion</h3>

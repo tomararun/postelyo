@@ -25,7 +25,7 @@ import { assertPublicationTransition } from '../posts/state-machine.js';
 import { systemContext, type TenantContext } from '../tenancy/tenant-context.js';
 import { backoffMs } from './backoff.js';
 import type { JobEnqueuer, PublishJobData } from './jobs.js';
-import type { PublishResult, SocialAccountRef } from './provider.js';
+import type { AccountType, PublishResult, SocialAccountRef } from './provider.js';
 import type { ProviderRegistry } from './registry.js';
 
 export type PublishOutcome = 'skipped' | 'published' | 'retry_scheduled' | 'failed' | 'ambiguous';
@@ -212,6 +212,11 @@ export class PublishEngine {
                     const row = mediaRows.get(assetId);
                     if (!row) throw new MediaError('not_found', `media asset ${assetId} missing`);
                     return this.deps.media.load(ctx, row, sourceRef);
+                  },
+                  mediaUrl: async (assetId, spec) => {
+                    const row = mediaRows.get(assetId);
+                    if (!row) throw new MediaError('not_found', `media asset ${assetId} missing`);
+                    return this.deps.media.publicUrl(ctx, row, spec, sourceRef);
                   },
                   onMediaUploaded: (assetId, providerRef, contentHash) =>
                     this.deps.media.recordProviderRef(
@@ -504,12 +509,14 @@ export class PublishEngine {
   }
 }
 
+const ACCOUNT_TYPES = new Set(['member', 'organization', 'page', 'business']);
+
 export function accountRef(a: SocialAccount): SocialAccountRef {
   return {
     id: a.id,
     workspaceId: a.workspaceId,
     provider: a.provider,
-    accountType: a.accountType === 'organization' ? 'organization' : 'member',
+    accountType: (ACCOUNT_TYPES.has(a.accountType) ? a.accountType : 'member') as AccountType,
     providerAccountId: a.providerAccountId,
     displayName: a.displayName,
   };

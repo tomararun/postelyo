@@ -15,6 +15,8 @@ export interface OAuthStateRow {
   provider: OAuthProvider;
   accountType: OAuthAccountType;
   redirectTo: string;
+  /** PKCE verifier when the provider uses it (X). */
+  pkceVerifier: string | null;
 }
 
 const TTL_MS = 10 * 60 * 1000;
@@ -35,6 +37,7 @@ export class OAuthStateService {
     provider: OAuthProvider;
     accountType?: OAuthAccountType | undefined;
     redirectTo: string;
+    pkceVerifier?: string | undefined;
   }): Promise<string> {
     if (!isSameOriginPath(input.redirectTo))
       throw new Error('redirectTo must be a same-origin path');
@@ -46,6 +49,7 @@ export class OAuthStateService {
       provider: input.provider,
       accountType: input.accountType ?? 'member',
       redirectTo: input.redirectTo,
+      pkceVerifier: input.pkceVerifier ?? null,
       expiresAt: new Date(this.clock.now().getTime() + TTL_MS),
     });
     return id;
@@ -77,6 +81,7 @@ export class OAuthStateService {
         provider: oauthState.provider,
         accountType: oauthState.accountType,
         redirectTo: oauthState.redirectTo,
+        pkceVerifier: oauthState.pkceVerifier,
       });
     if (!row) return null;
     return {

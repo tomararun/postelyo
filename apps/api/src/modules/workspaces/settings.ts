@@ -13,12 +13,18 @@ import type { Workspace } from '../../infra/db/schema.js';
 export const DEFAULT_DAILY_CAP_PER_ACCOUNT = 100;
 export const MAX_DAILY_CAP_PER_ACCOUNT = 1000;
 
+/** Providers that can be switched on per workspace (Phase 2). LinkedIn is always on. */
+export const FLAGGED_PROVIDERS = ['x', 'facebook', 'instagram'] as const;
+export type FlaggedProvider = (typeof FLAGGED_PROVIDERS)[number];
+
 export interface WorkspaceSettings {
   v: 1;
   /** Posts per social account per rolling 24 h; `undefined` = default. */
   dailyCapPerAccount?: number;
   /** Process inbound Notion webhooks for this workspace (polling stays authoritative). */
   notionWebhooks?: boolean;
+  /** Per-workspace platform flags; a platform is usable only when the server has app credentials too. */
+  providers?: Partial<Record<FlaggedProvider, boolean>>;
 }
 
 export function readSettings(ws: Pick<Workspace, 'settings'>): WorkspaceSettings {
@@ -28,6 +34,14 @@ export function readSettings(ws: Pick<Workspace, 'settings'>): WorkspaceSettings
     out.dailyCapPerAccount = raw.dailyCapPerAccount;
   }
   if (typeof raw.notionWebhooks === 'boolean') out.notionWebhooks = raw.notionWebhooks;
+  if (typeof raw.providers === 'object' && raw.providers !== null) {
+    const providers: Partial<Record<FlaggedProvider, boolean>> = {};
+    for (const p of FLAGGED_PROVIDERS) {
+      const v = (raw.providers as Record<string, unknown>)[p];
+      if (typeof v === 'boolean') providers[p] = v;
+    }
+    out.providers = providers;
+  }
   return out;
 }
 
@@ -37,4 +51,11 @@ export function dailyCapFor(ws: Pick<Workspace, 'settings'>): number {
 
 export function notionWebhooksEnabled(ws: Pick<Workspace, 'settings'>): boolean {
   return readSettings(ws).notionWebhooks === true;
+}
+
+/** LinkedIn is always enabled; the others need the workspace flag. */
+export function providerEnabled(ws: Pick<Workspace, 'settings'>, provider: string): boolean {
+  if (provider === 'linkedin' || provider === 'fake') return true;
+  const flags = readSettings(ws).providers ?? {};
+  return flags[provider as FlaggedProvider] === true;
 }

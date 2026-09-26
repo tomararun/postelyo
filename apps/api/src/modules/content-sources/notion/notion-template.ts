@@ -26,6 +26,7 @@ export const POSTELYO_STATUS_OPTIONS = [
   { name: 'Published', color: 'green' },
   { name: 'Published late', color: 'green' },
   { name: 'Failed', color: 'red' },
+  { name: 'Partially failed', color: 'orange' },
   { name: 'Needs review', color: 'orange' },
   { name: 'Needs re-authorization', color: 'orange' },
 ] as const;
@@ -33,6 +34,9 @@ export const POSTELYO_STATUS_OPTIONS = [
 export const PLATFORM_OPTIONS = [
   { name: 'LinkedIn', color: 'blue' },
   { name: 'LinkedIn Page', color: 'blue' },
+  { name: 'X', color: 'default' },
+  { name: 'Facebook Page', color: 'purple' },
+  { name: 'Instagram', color: 'pink' },
 ] as const;
 
 /** Notion API property definitions for `POST /v1/databases`. */
@@ -45,9 +49,14 @@ export function templateProperties(): Record<string, unknown> {
     'Post Text': { rich_text: {} },
     Media: { files: {} },
     'Time Zone': { select: { options: [] } },
+    'LinkedIn Text': { rich_text: {} },
+    'X Text': { rich_text: {} },
+    'Facebook Text': { rich_text: {} },
+    'Instagram Caption': { rich_text: {} },
     'Postelyo Status': { select: { options: [...POSTELYO_STATUS_OPTIONS] } },
     'Postelyo Note': { rich_text: {} },
     'Published URL': { url: {} },
+    'Published URLs': { rich_text: {} },
     'Published At': { date: {} },
     'Postelyo ID': { rich_text: {} },
   };

@@ -1,6 +1,9 @@
 import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { LinkedInConnectFlow } from '../../modules/connections/linkedin/linkedin-connect.js';
+import type { MetaConnectFlow } from '../../modules/connections/meta/meta-connect.js';
+import type { XConnectFlow } from '../../modules/connections/x/x-connect.js';
+import { providerEnabled } from '../../modules/workspaces/settings.js';
 import {
   ConnectionError,
   type SocialAccountService,
@@ -19,6 +22,8 @@ export interface ConnectionRoutesOptions {
   contentSources: ContentSourceService;
   notionSync: NotionSyncService;
   linkedin: LinkedInConnectFlow | null;
+  x: XConnectFlow | null;
+  meta: MetaConnectFlow | null;
 }
 
 const notionBody = z.object({ token: z.string().min(1), database: z.string().min(1) }).strict();
@@ -44,10 +49,66 @@ export const connectionRoutes: FastifyPluginAsync<ConnectionRoutesOptions> = asy
 
   // --- social accounts -----------------------------------------------------
 
-  app.get('/v1/workspaces/:workspaceId/social-accounts', { preHandler: viewer }, async (req) => ({
-    linkedinConfigured: opts.linkedin !== null,
-    accounts: await opts.socialAccounts.list(req.tenant!),
-  }));
+  app.get('/v1/workspaces/:workspaceId/social-accounts', { preHandler: viewer }, async (req) => {
+    const ws = await opts.workspaces.get(req.tenant!);
+    return {
+      linkedinConfigured: opts.linkedin !== null,
+      /** Providers the server has app credentials for AND the workspace switched on. */
+      configured: {
+        linkedin: opts.linkedin !== null,
+        x: opts.x !== null && providerEnabled(ws, 'x'),
+        facebook: opts.meta !== null && providerEnabled(ws, 'facebook'),
+        instagram: opts.meta !== null && providerEnabled(ws, 'instagram'),
+      },
+      accounts: await opts.socialAccounts.list(req.tenant!),
+    };
+  });
+
+  /** X (Twitter) profile via OAuth 2.0 PKCE (Phase 2); needs the workspace flag. */
+  app.get(
+    '/v1/workspaces/:workspaceId/social-accounts/x/connect',
+    { preHandler: admin },
+    async (req, reply) => {
+      if (!opts.x) {
+        return problem(reply, req, 503, 'X is not configured on this server', {
+          code: 'x_not_configured',
+        });
+      }
+      const ws = await opts.workspaces.get(req.tenant!);
+      if (!providerEnabled(ws, 'x')) {
+        return problem(reply, req, 403, 'X is not enabled for this workspace', {
+          code: 'provider_disabled',
+        });
+      }
+      return reply.redirect(await opts.x.start(req.tenant!, req.user!.id));
+    },
+  );
+
+  /** Facebook Pages and linked Instagram accounts via Facebook Login (Phase 2). */
+  app.get(
+    '/v1/workspaces/:workspaceId/social-accounts/meta/connect',
+    { preHandler: admin },
+    async (req, reply) => {
+      if (!opts.meta) {
+        return problem(reply, req, 503, 'Facebook is not configured on this server', {
+          code: 'meta_not_configured',
+        });
+      }
+      const ws = await opts.workspaces.get(req.tenant!);
+      if (!providerEnabled(ws, 'facebook') && !providerEnabled(ws, 'instagram')) {
+        return problem(
+          reply,
+          req,
+          403,
+          'Facebook and Instagram are not enabled for this workspace',
+          {
+            code: 'provider_disabled',
+          },
+        );
+      }
+      return reply.redirect(await opts.meta.start(req.tenant!, req.user!.id));
+    },
+  );
 
   /** `?type=organization` connects the LinkedIn Pages the member administers (Phase 1). */
   app.get(

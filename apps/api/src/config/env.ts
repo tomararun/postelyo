@@ -30,6 +30,22 @@ const envSchema = z.object({
   /** LinkedIn OAuth app. Both or neither; required when PROVIDER_MODE=live in production. */
   LINKEDIN_CLIENT_ID: z.string().min(1).optional(),
   LINKEDIN_CLIENT_SECRET: z.string().min(1).optional(),
+  /** X (Twitter) OAuth 2.0 app (confidential client). Both or neither. */
+  X_CLIENT_ID: z.string().min(1).optional(),
+  X_CLIENT_SECRET: z.string().min(1).optional(),
+  /** Meta app for Facebook Pages and Instagram. Both or neither. */
+  META_APP_ID: z.string().min(1).optional(),
+  META_APP_SECRET: z.string().min(1).optional(),
+  /** Media object storage (Phase 2): `local` serves files from the api; `s3` for R2/MinIO/AWS. */
+  STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
+  STORAGE_LOCAL_DIR: z.string().min(1).default('.data/media'),
+  S3_ENDPOINT: z.url().optional(),
+  S3_REGION: z.string().min(1).optional(),
+  S3_BUCKET: z.string().min(1).optional(),
+  S3_ACCESS_KEY_ID: z.string().min(1).optional(),
+  S3_SECRET_ACCESS_KEY: z.string().min(1).optional(),
+  /** Public origin for objects (R2 custom domain / CDN). Without it, presigned URLs are used. */
+  S3_PUBLIC_BASE_URL: z.url().optional(),
   /**
    * Notion webhook verification token (architecture §11.1). Notion sends it once
    * when the subscription is created; unset = inbound webhooks are ignored.
@@ -76,6 +92,17 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   if (Boolean(env.LINKEDIN_CLIENT_ID) !== Boolean(env.LINKEDIN_CLIENT_SECRET)) {
     issues.push('LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET: set both or neither');
   }
+  if (Boolean(env.X_CLIENT_ID) !== Boolean(env.X_CLIENT_SECRET)) {
+    issues.push('X_CLIENT_ID / X_CLIENT_SECRET: set both or neither');
+  }
+  if (Boolean(env.META_APP_ID) !== Boolean(env.META_APP_SECRET)) {
+    issues.push('META_APP_ID / META_APP_SECRET: set both or neither');
+  }
+  if (env.STORAGE_DRIVER === 's3') {
+    for (const k of ['S3_BUCKET', 'S3_ACCESS_KEY_ID', 'S3_SECRET_ACCESS_KEY'] as const) {
+      if (!env[k]) issues.push(`${k}: required when STORAGE_DRIVER=s3`);
+    }
+  }
   if (env.NODE_ENV === 'production') {
     if (!env.ALERT_EMAIL) issues.push('ALERT_EMAIL: required in production');
     if (env.MAIL_TRANSPORT !== 'smtp') issues.push('MAIL_TRANSPORT: must be smtp in production');
@@ -90,9 +117,28 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   return env;
 }
 
+export interface OAuthAppConfig {
+  clientId: string;
+  clientSecret: string;
+}
+
 /** LinkedIn OAuth config, or null when the app is not configured (connect button disabled). */
-export function linkedInConfig(env: Env): { clientId: string; clientSecret: string } | null {
+export function linkedInConfig(env: Env): OAuthAppConfig | null {
   return env.LINKEDIN_CLIENT_ID && env.LINKEDIN_CLIENT_SECRET
     ? { clientId: env.LINKEDIN_CLIENT_ID, clientSecret: env.LINKEDIN_CLIENT_SECRET }
+    : null;
+}
+
+export function xConfig(env: Pick<Env, 'X_CLIENT_ID' | 'X_CLIENT_SECRET'>): OAuthAppConfig | null {
+  return env.X_CLIENT_ID && env.X_CLIENT_SECRET
+    ? { clientId: env.X_CLIENT_ID, clientSecret: env.X_CLIENT_SECRET }
+    : null;
+}
+
+export function metaConfig(
+  env: Pick<Env, 'META_APP_ID' | 'META_APP_SECRET'>,
+): OAuthAppConfig | null {
+  return env.META_APP_ID && env.META_APP_SECRET
+    ? { clientId: env.META_APP_ID, clientSecret: env.META_APP_SECRET }
     : null;
 }

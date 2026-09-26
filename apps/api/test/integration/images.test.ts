@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { and, eq, inArray } from 'drizzle-orm';
-import { mediaAsset, post, publication } from '../../src/infra/db/schema.js';
+import { mediaAsset, mediaObject, post, publication } from '../../src/infra/db/schema.js';
 import { TINY_PNG_1x1 } from '../../src/modules/media/test-images.js';
-import type { FakeProvider } from '../../src/modules/publishing/providers/fake/fake-provider.js';
+import type { FakeProvider } from '@postelyo/publishing-core';
 import {
   FILES_HOST,
   NOTION_GOOD_DB,
@@ -176,6 +176,13 @@ describe('images', () => {
     expect(assets[0]?.contentHash).toMatch(/^[0-9a-f]{64}$/); // inspected while the URL was fresh
     const staleUrl = assets[0]!.sourceUrl;
 
+    // Phase 2 keeps the inspected bytes in storage, so a publish normally never re-downloads.
+    // Simulate storage loss: the engine must fall back to the source and refresh the stale URL.
+    const [objRow] = await stack.db.db
+      .select()
+      .from(mediaObject)
+      .where(eq(mediaObject.id, assets[0]!.mediaObjectId!));
+    await stack.services.storage.delete(objRow!.storageKey);
     // Any Notion read since sync has rotated the signature, so the stored URL is stale.
     fake.notion.fileSig += 5;
     expect(await publish(pub!.id, pub!.cycleNo)).toBe('published');

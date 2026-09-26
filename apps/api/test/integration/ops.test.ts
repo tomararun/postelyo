@@ -206,7 +206,8 @@ describe('ops: alerts, token lifecycle, digest, metrics, operator pages', () => 
       .where(eq(socialAccount.id, accountId));
     const before = adminMails().length;
     const r1 = await stack.services.tokenExpiry.run('t1');
-    expect(r1.reminders).toBe(1);
+    expect(r1.reminders).toBeGreaterThanOrEqual(1); // other suites may hold short-lived tokens too
+    expect(adminMails().length).toBe(before + 1);
     const mail = adminMails().at(-1)!;
     expect(mail.subject).toMatch(/expires in 3 days/);
     expect(mail.text).toContain(`/w/${workspaceId}/connections`);

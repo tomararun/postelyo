@@ -14,6 +14,7 @@ export const POSTELYO_STATUS = {
   published: 'Published',
   publishedLate: 'Published late',
   failed: 'Failed',
+  partiallyFailed: 'Partially failed',
   needsReview: 'Needs review',
   needsReauth: 'Needs re-authorization',
 } as const;
@@ -34,6 +35,8 @@ export interface DesiredWriteback {
   postelyoId: string;
   publishedUrl?: string | null;
   publishedAt?: string | null;
+  /** One `<label>: <url>` per platform (Phase 2); written only when the database has the property. */
+  publishedUrls?: { label: string; url: string }[];
 }
 
 /** Notion rich_text objects are capped at 2 000 characters; keep a margin for safety. */
@@ -80,6 +83,18 @@ export function writebackPatch(
     props[propName(map, 'Published At')] = {
       date: desired.publishedAt ? { start: desired.publishedAt } : null,
     };
+  }
+  // Optional column: only databases that have it get the per-platform links.
+  if (desired.publishedUrls !== undefined && map['Published URLs']) {
+    const text = desired.publishedUrls.map((u) => `${u.label}: ${u.url}`).join('\n');
+    if ((current.publishedUrls ?? '') !== text) {
+      props[map['Published URLs']] = {
+        rich_text: desired.publishedUrls.flatMap((u, i) => [
+          { type: 'text', text: { content: `${i > 0 ? '\n' : ''}${u.label}: ` } },
+          { type: 'text', text: { content: u.url, link: { url: u.url } } },
+        ]),
+      };
+    }
   }
   return Object.keys(props).length === 0 ? null : props;
 }

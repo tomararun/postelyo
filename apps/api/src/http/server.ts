@@ -1,5 +1,5 @@
 import formbody from '@fastify/formbody';
-import { linkedInConfig, type Env } from '../config/env.js';
+import { linkedInConfig, metaConfig, xConfig, type Env } from '../config/env.js';
 import type { Db } from '../infra/db/client.js';
 import type { KeyProvider } from '../infra/crypto/key-provider.js';
 import type { Logger } from '../infra/logger.js';
@@ -7,11 +7,16 @@ import type { Mailer } from '../infra/mailer.js';
 import { createAuth } from '../modules/auth/auth.js';
 import { LinkedInConnectFlow } from '../modules/connections/linkedin/linkedin-connect.js';
 import { LinkedInOAuthClient } from '../modules/connections/linkedin/linkedin-oauth.js';
+import { MetaConnectFlow } from '../modules/connections/meta/meta-connect.js';
+import { MetaOAuthClient } from '../modules/connections/meta/meta-oauth.js';
 import { OAuthStateService } from '../modules/connections/oauth-state.service.js';
+import { XConnectFlow } from '../modules/connections/x/x-connect.js';
+import { XOAuthClient } from '../modules/connections/x/x-oauth.js';
 import type { Services } from '../services.js';
 import { buildApp, type App } from './app.js';
 import { authPlugin, decorateAuth } from './plugins/auth.js';
 import { connectionRoutes } from './routes/connections.js';
+import { mediaRoutes } from './routes/media.js';
 import { meRoutes } from './routes/me.js';
 import { metricsRoutes } from './routes/metrics.js';
 import { oauthRoutes } from './routes/oauth.js';
@@ -46,6 +51,9 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     metrics,
   } = deps.services;
 
+  const states = new OAuthStateService(deps.db);
+  const returnPath = (workspaceId: string) => `/w/${workspaceId}/connections`;
+  const fetchOpt = deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {};
   const li = linkedInConfig(deps.env);
   const linkedin = li
     ? new LinkedInConnectFlow({
@@ -55,11 +63,43 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
           clientId: li.clientId,
           clientSecret: li.clientSecret,
           redirectUri: new URL('/oauth/linkedin/callback', deps.env.APP_BASE_URL).toString(),
-          ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+          ...fetchOpt,
         }),
         socialAccounts,
-        states: new OAuthStateService(deps.db),
-        returnPath: (workspaceId) => `/w/${workspaceId}/connections`,
+        states,
+        returnPath,
+      })
+    : null;
+  const xc = xConfig(deps.env);
+  const x = xc
+    ? new XConnectFlow({
+        db: deps.db,
+        logger: deps.logger,
+        client: new XOAuthClient({
+          clientId: xc.clientId,
+          clientSecret: xc.clientSecret,
+          redirectUri: new URL('/oauth/x/callback', deps.env.APP_BASE_URL).toString(),
+          ...fetchOpt,
+        }),
+        socialAccounts,
+        states,
+        returnPath,
+      })
+    : null;
+  const mc = metaConfig(deps.env);
+  const meta = mc
+    ? new MetaConnectFlow({
+        db: deps.db,
+        logger: deps.logger,
+        client: new MetaOAuthClient({
+          appId: mc.clientId,
+          appSecret: mc.clientSecret,
+          redirectUri: new URL('/oauth/meta/callback', deps.env.APP_BASE_URL).toString(),
+          ...fetchOpt,
+        }),
+        socialAccounts,
+        states,
+        returnPath,
       })
     : null;
 
@@ -79,6 +119,7 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
   await app.register(authPlugin, { auth, appBaseUrl: deps.env.APP_BASE_URL });
   await app.register(metricsRoutes, { metrics, token: deps.env.METRICS_TOKEN ?? null });
   await app.register(webhookRoutes, { notion: deps.services.notionWebhooks });
+  await app.register(mediaRoutes, { storage: deps.services.storage });
   await app.register(pageRoutes, {
     workspaces,
     socialAccounts,
@@ -87,6 +128,8 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     heartbeat: deps.services.heartbeat,
     appBaseUrl: deps.env.APP_BASE_URL,
     linkedinConfigured: linkedin !== null,
+    xConfigured: x !== null,
+    metaConfigured: meta !== null,
     providerMode: deps.env.PROVIDER_MODE,
   });
   await app.register(opsPageRoutes, {
@@ -95,7 +138,7 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     publications,
     appBaseUrl: deps.env.APP_BASE_URL,
   });
-  await app.register(oauthRoutes, { linkedin });
+  await app.register(oauthRoutes, { linkedin, x, meta });
   await app.register(meRoutes, { workspaces });
   await app.register(workspaceRoutes, { workspaces });
   await app.register(connectionRoutes, {
@@ -104,6 +147,8 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     contentSources,
     notionSync,
     linkedin,
+    x,
+    meta,
   });
   await app.register(postRoutes, { postQuery, workspaces });
   await app.register(publicationRoutes, { workspaces, publications });

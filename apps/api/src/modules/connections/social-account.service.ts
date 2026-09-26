@@ -2,6 +2,8 @@ import { and, eq, inArray, isNull } from 'drizzle-orm';
 import type { Db } from '../../infra/db/client.js';
 import { socialAccount, type SocialAccount } from '../../infra/db/schema.js';
 import { withTenantScope, type TenantTx } from '../../infra/db/tenant-scope.js';
+import type { Clock } from '../../shared/clock.js';
+import { systemClock } from '../../shared/clock.js';
 import { uuidv7 } from '../../shared/ids.js';
 import { recordAudit } from '../audit/audit.js';
 import type { TenantContext } from '../tenancy/tenant-context.js';
@@ -14,7 +16,7 @@ import type {
 
 export class ConnectionError extends Error {
   constructor(
-    public readonly code: 'already_connected' | 'not_found' | 'no_credentials',
+    public readonly code: 'already_connected' | 'not_found' | 'no_credentials' | 'refresh_failed',
     message: string,
   ) {
     super(message);
@@ -22,12 +24,26 @@ export class ConnectionError extends Error {
   }
 }
 
-export type SocialAccountType = 'member' | 'organization';
+export type SocialAccountType = 'member' | 'organization' | 'page' | 'business';
+export type SocialProvider = SocialAccount['provider'];
+
+/** Tokens as every OAuth client returns them. */
+export interface AccountTokens {
+  accessToken: string;
+  /** Null for tokens that do not expire (Meta Page tokens). */
+  expiresAt: Date | null;
+  scopes: string[];
+  refreshToken?: string | undefined;
+  refreshTokenExpiresAt?: Date | undefined;
+}
+
+/** Refreshes an expiring access token (X); registered per provider by the composition root. */
+export type TokenRefresher = (refreshToken: string) => Promise<AccountTokens>;
 
 /** Public shape: never includes token columns (security.md §7). */
 export interface SocialAccountDto {
   id: string;
-  provider: SocialAccount['provider'];
+  provider: SocialProvider;
   accountType: SocialAccountType;
   providerAccountId: string;
   displayName: string;
@@ -35,12 +51,17 @@ export interface SocialAccountDto {
   status: SocialAccount['status'];
   scopes: string[];
   tokenExpiresAt: Date | null;
+  parentAccountId: string | null;
   connectedAt: Date;
   disconnectedAt: Date | null;
 }
 
+const ACCOUNT_TYPES = new Set<SocialAccountType>(['member', 'organization', 'page', 'business']);
+
 export function accountTypeOf(a: Pick<SocialAccount, 'accountType'>): SocialAccountType {
-  return a.accountType === 'organization' ? 'organization' : 'member';
+  return ACCOUNT_TYPES.has(a.accountType as SocialAccountType)
+    ? (a.accountType as SocialAccountType)
+    : 'member';
 }
 
 export function toSocialAccountDto(a: SocialAccount): SocialAccountDto {
@@ -54,21 +75,47 @@ export function toSocialAccountDto(a: SocialAccount): SocialAccountDto {
     status: a.status,
     scopes: a.scopes,
     tokenExpiresAt: a.tokenExpiresAt,
+    parentAccountId: a.parentAccountId,
     connectedAt: a.createdAt,
     disconnectedAt: a.disconnectedAt,
   };
 }
 
+export interface UpsertAccountInput {
+  provider: SocialProvider;
+  accountType: SocialAccountType;
+  providerAccountId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  tokens: AccountTokens;
+  parentAccountId?: string | null | undefined;
+  metadata?: Record<string, unknown> | undefined;
+  /** Extra non-secret audit data. */
+  data?: Record<string, unknown> | undefined;
+}
+
+/** Refresh when the token expires within this window (X tokens last 2 h). */
+const REFRESH_LEAD_MS = 5 * 60_000;
+
 /**
  * Social accounts (domain-model §2.5, architecture §6). Tokens are sealed on the
- * way in and only opened through `withAccessToken`, which audits the access.
- * Tenant-facing methods run under the RLS tenant scope.
+ * way in and only opened through `withAccessToken`, which audits the access and
+ * refreshes expiring tokens when the provider supports it. Tenant-facing
+ * methods run under the RLS tenant scope. Any number of accounts per provider
+ * (Phase 2); the Notion `Platforms` option picks the target.
  */
 export class SocialAccountService {
+  private readonly refreshers = new Map<SocialProvider, TokenRefresher>();
+
   constructor(
     private readonly db: Db,
     private readonly vault: CredentialVault,
+    private readonly clock: Clock = systemClock,
   ) {}
+
+  registerRefresher(provider: SocialProvider, refresher: TokenRefresher): void {
+    this.refreshers.set(provider, refresher);
+  }
 
   async list(ctx: TenantContext): Promise<SocialAccountDto[]> {
     const rows = await withTenantScope(this.db, ctx.workspaceId, (tx) =>
@@ -92,44 +139,23 @@ export class SocialAccountService {
     return row ?? null;
   }
 
-  /**
-   * Upserts the LinkedIn personal profile for this workspace. Rule (P1): one
-   * connected LinkedIn profile per workspace; reconnecting the same profile
-   * refreshes tokens, a different profile is rejected until disconnect.
-   */
+  /** Upserts one LinkedIn personal profile (reconnecting refreshes its token). */
   async connectLinkedIn(
     ctx: TenantContext,
     identity: LinkedInIdentity,
     tokens: LinkedInTokens,
   ): Promise<SocialAccountDto> {
-    return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
-      const existing = await tx
-        .select()
-        .from(socialAccount)
-        .where(
-          and(
-            eq(socialAccount.workspaceId, ctx.workspaceId),
-            eq(socialAccount.provider, 'linkedin'),
-            eq(socialAccount.accountType, 'member'),
-            isNull(socialAccount.disconnectedAt),
-          ),
-        );
-      const other = existing.find((a) => a.providerAccountId !== identity.sub);
-      if (other) {
-        throw new ConnectionError(
-          'already_connected',
-          `A different LinkedIn profile (${other.displayName}) is already connected. Disconnect it first.`,
-        );
-      }
-      const row = await this.upsert(tx, ctx, {
+    const row = await withTenantScope(this.db, ctx.workspaceId, (tx) =>
+      this.upsert(tx, ctx, {
+        provider: 'linkedin',
         accountType: 'member',
         providerAccountId: identity.sub,
         displayName: identity.name,
         avatarUrl: identity.picture ?? null,
         tokens,
-      });
-      return toSocialAccountDto(row);
-    });
+      }),
+    );
+    return toSocialAccountDto(row);
   }
 
   /**
@@ -148,13 +174,37 @@ export class SocialAccountService {
       const out: SocialAccountDto[] = [];
       for (const org of organizations) {
         const row = await this.upsert(tx, ctx, {
+          provider: 'linkedin',
           accountType: 'organization',
           providerAccountId: org.id,
           displayName: org.name,
           avatarUrl: org.logoUrl ?? null,
           tokens,
-          data: { authorizedBy: identity.sub, vanityName: org.vanityName ?? null },
+          metadata: { vanityName: org.vanityName ?? null },
+          data: { authorizedBy: identity.sub },
         });
+        out.push(toSocialAccountDto(row));
+      }
+      return out;
+    });
+  }
+
+  /** Generic connect for any provider (X profile, Facebook Pages, Instagram accounts). */
+  async connectAccounts(
+    ctx: TenantContext,
+    inputs: UpsertAccountInput[],
+  ): Promise<SocialAccountDto[]> {
+    return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
+      const out: SocialAccountDto[] = [];
+      const idsByProviderAccount = new Map<string, string>();
+      for (const input of inputs) {
+        // Children (Instagram) reference the parent row created earlier in the same batch.
+        const parent =
+          input.parentAccountId && idsByProviderAccount.has(input.parentAccountId)
+            ? idsByProviderAccount.get(input.parentAccountId)!
+            : input.parentAccountId;
+        const row = await this.upsert(tx, ctx, { ...input, parentAccountId: parent ?? null });
+        idsByProviderAccount.set(`${input.provider}:${input.providerAccountId}`, row.id);
         out.push(toSocialAccountDto(row));
       }
       return out;
@@ -164,14 +214,7 @@ export class SocialAccountService {
   private async upsert(
     tx: TenantTx,
     ctx: TenantContext,
-    input: {
-      accountType: SocialAccountType;
-      providerAccountId: string;
-      displayName: string;
-      avatarUrl: string | null;
-      tokens: LinkedInTokens;
-      data?: Record<string, unknown>;
-    },
+    input: UpsertAccountInput,
   ): Promise<SocialAccount> {
     const userId = ctx.actor.type === 'user' ? ctx.actor.id : null;
     const [existing] = await tx
@@ -180,41 +223,35 @@ export class SocialAccountService {
       .where(
         and(
           eq(socialAccount.workspaceId, ctx.workspaceId),
-          eq(socialAccount.provider, 'linkedin'),
+          eq(socialAccount.provider, input.provider),
           eq(socialAccount.providerAccountId, input.providerAccountId),
         ),
       )
       .limit(1);
 
     const id = existing?.id ?? uuidv7();
-    const ref = { entityType: 'social_account' as const, entityId: id };
-    const { tokens } = input;
-    const sealed = {
+    const sealed = this.sealTokens(id, input.tokens);
+    const values = {
       accountType: input.accountType,
-      accessTokenEnc: this.vault.seal({ ...ref, column: 'access_token' }, tokens.accessToken),
-      refreshTokenEnc: tokens.refreshToken
-        ? this.vault.seal({ ...ref, column: 'refresh_token' }, tokens.refreshToken)
-        : null,
-      credentialKeyId: this.vault.currentKeyId,
-      tokenExpiresAt: tokens.expiresAt,
-      refreshTokenExpiresAt: tokens.refreshTokenExpiresAt ?? null,
-      scopes: tokens.scopes,
+      ...sealed,
       displayName: input.displayName,
       avatarUrl: input.avatarUrl,
       status: 'active' as const,
       disconnectedAt: null,
       connectedByUserId: userId,
+      parentAccountId: input.parentAccountId ?? null,
+      metadata: input.metadata ?? existing?.metadata ?? {},
       // A fresh token restarts the expiry-reminder cycle.
       reauthReminderSentAt: null,
       reauthNotifiedAt: null,
-      updatedAt: new Date(),
+      updatedAt: this.clock.now(),
     };
 
     let row: SocialAccount;
     if (existing) {
       const [updated] = await tx
         .update(socialAccount)
-        .set(sealed)
+        .set(values)
         .where(eq(socialAccount.id, existing.id))
         .returning();
       row = updated!;
@@ -224,9 +261,9 @@ export class SocialAccountService {
         .values({
           id,
           workspaceId: ctx.workspaceId,
-          provider: 'linkedin',
+          provider: input.provider,
           providerAccountId: input.providerAccountId,
-          ...sealed,
+          ...values,
         })
         .returning();
       row = inserted!;
@@ -242,32 +279,48 @@ export class SocialAccountService {
       toState: 'active',
       correlationId: ctx.correlationId,
       data: {
-        provider: 'linkedin',
+        provider: input.provider,
         accountType: input.accountType,
-        scopes: tokens.scopes,
-        tokenExpiresAt: tokens.expiresAt.toISOString(),
-        hasRefreshToken: Boolean(tokens.refreshToken),
+        scopes: input.tokens.scopes,
+        tokenExpiresAt: input.tokens.expiresAt?.toISOString() ?? null,
+        hasRefreshToken: Boolean(input.tokens.refreshToken),
         ...(input.data ?? {}),
       },
     });
     return row;
   }
 
-  /** Wipes tokens, keeps the row for audit (domain-model invariant 4). */
+  private sealTokens(id: string, tokens: AccountTokens) {
+    const ref = { entityType: 'social_account' as const, entityId: id };
+    return {
+      accessTokenEnc: this.vault.seal({ ...ref, column: 'access_token' }, tokens.accessToken),
+      refreshTokenEnc: tokens.refreshToken
+        ? this.vault.seal({ ...ref, column: 'refresh_token' }, tokens.refreshToken)
+        : null,
+      credentialKeyId: this.vault.currentKeyId,
+      tokenExpiresAt: tokens.expiresAt,
+      refreshTokenExpiresAt: tokens.refreshTokenExpiresAt ?? null,
+      scopes: tokens.scopes,
+    };
+  }
+
+  /** Wipes tokens, keeps the row for audit (domain-model invariant 4). Children are disconnected too. */
   async disconnect(ctx: TenantContext, id: string): Promise<void> {
     await withTenantScope(this.db, ctx.workspaceId, async (tx) => {
+      const now = this.clock.now();
+      const wipe = {
+        status: 'disabled' as const,
+        accessTokenEnc: null,
+        refreshTokenEnc: null,
+        credentialKeyId: null,
+        tokenExpiresAt: null,
+        refreshTokenExpiresAt: null,
+        disconnectedAt: now,
+        updatedAt: now,
+      };
       const [row] = await tx
         .update(socialAccount)
-        .set({
-          status: 'disabled',
-          accessTokenEnc: null,
-          refreshTokenEnc: null,
-          credentialKeyId: null,
-          tokenExpiresAt: null,
-          refreshTokenExpiresAt: null,
-          disconnectedAt: new Date(),
-          updatedAt: new Date(),
-        })
+        .set(wipe)
         .where(
           and(
             eq(socialAccount.workspaceId, ctx.workspaceId),
@@ -277,22 +330,36 @@ export class SocialAccountService {
         )
         .returning({ id: socialAccount.id, status: socialAccount.status });
       if (!row) throw new ConnectionError('not_found', 'social account not found');
-      await recordAudit(tx, {
-        workspaceId: ctx.workspaceId,
-        actor: ctx.actor,
-        entityType: 'social_account',
-        entityId: id,
-        event: 'social_account.disconnected',
-        toState: 'disabled',
-        correlationId: ctx.correlationId,
-      });
+      const children = await tx
+        .update(socialAccount)
+        .set(wipe)
+        .where(
+          and(
+            eq(socialAccount.workspaceId, ctx.workspaceId),
+            eq(socialAccount.parentAccountId, id),
+            isNull(socialAccount.disconnectedAt),
+          ),
+        )
+        .returning({ id: socialAccount.id });
+      for (const target of [row, ...children]) {
+        await recordAudit(tx, {
+          workspaceId: ctx.workspaceId,
+          actor: ctx.actor,
+          entityType: 'social_account',
+          entityId: target.id,
+          event: 'social_account.disconnected',
+          toState: 'disabled',
+          correlationId: ctx.correlationId,
+          ...(target.id !== id ? { data: { reason: 'parent_disconnected', parentId: id } } : {}),
+        });
+      }
     });
   }
 
   /** Active (or re-auth pending) accounts of a workspace, optionally filtered by type. */
   async listUsable(
     ctx: TenantContext,
-    filter: { provider?: SocialAccount['provider']; accountType?: SocialAccountType } = {},
+    filter: { provider?: SocialProvider; accountType?: SocialAccountType } = {},
   ): Promise<SocialAccount[]> {
     const conditions = [
       eq(socialAccount.workspaceId, ctx.workspaceId),
@@ -310,23 +377,90 @@ export class SocialAccountService {
     );
   }
 
-  /** Runs `fn` with the decrypted access token; access is audited with `reason`. */
+  /**
+   * Runs `fn` with the decrypted access token; access is audited with `reason`.
+   * An expiring token is refreshed first when the provider has a refresher and
+   * a refresh token is stored (X); a failed refresh throws `refresh_failed`.
+   */
   async withAccessToken<T>(
     ctx: TenantContext,
     id: string,
     reason: CredentialReason,
     fn: (accessToken: string, account: SocialAccount) => Promise<T>,
   ): Promise<T> {
-    const account = await this.get(ctx, id);
+    let account = await this.get(ctx, id);
     if (!account) throw new ConnectionError('not_found', 'social account not found');
     if (!account.accessTokenEnc)
       throw new ConnectionError('no_credentials', 'account has no token');
+    const now = this.clock.now();
+    const refresher = this.refreshers.get(account.provider);
+    if (
+      refresher &&
+      account.refreshTokenEnc &&
+      account.tokenExpiresAt &&
+      account.tokenExpiresAt.getTime() < now.getTime() + REFRESH_LEAD_MS
+    ) {
+      account = await this.refresh(ctx, account, refresher);
+    }
     return this.vault.withCredential(
       ctx,
       { entityType: 'social_account', entityId: id, column: 'access_token' },
-      account.accessTokenEnc,
+      account.accessTokenEnc!,
       reason,
       (token) => fn(token, account),
     );
+  }
+
+  private async refresh(
+    ctx: TenantContext,
+    account: SocialAccount,
+    refresher: TokenRefresher,
+  ): Promise<SocialAccount> {
+    let tokens: AccountTokens;
+    try {
+      tokens = await this.vault.withCredential(
+        ctx,
+        { entityType: 'social_account', entityId: account.id, column: 'refresh_token' },
+        account.refreshTokenEnc!,
+        'refresh',
+        (refreshToken) => refresher(refreshToken),
+      );
+    } catch (err) {
+      throw new ConnectionError(
+        'refresh_failed',
+        `Could not refresh the ${account.provider} token: ${(err as Error).message}`,
+      );
+    }
+    // A provider that does not rotate refresh tokens keeps the old one usable.
+    const merged: AccountTokens = {
+      ...tokens,
+      refreshToken: tokens.refreshToken ?? undefined,
+    };
+    return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
+      const sealed = this.sealTokens(account.id, merged);
+      const [updated] = await tx
+        .update(socialAccount)
+        .set({
+          ...sealed,
+          ...(merged.refreshToken ? {} : { refreshTokenEnc: account.refreshTokenEnc }),
+          reauthReminderSentAt: null,
+          updatedAt: this.clock.now(),
+        })
+        .where(eq(socialAccount.id, account.id))
+        .returning();
+      await recordAudit(tx, {
+        workspaceId: ctx.workspaceId,
+        actor: ctx.actor,
+        entityType: 'social_account',
+        entityId: account.id,
+        event: 'social_account.token_refreshed',
+        correlationId: ctx.correlationId,
+        data: {
+          provider: account.provider,
+          tokenExpiresAt: merged.expiresAt?.toISOString() ?? null,
+        },
+      });
+      return updated!;
+    });
   }
 }

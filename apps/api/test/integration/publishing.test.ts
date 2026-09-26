@@ -14,7 +14,7 @@ import { JOB, PgBossEnqueuer } from '../../src/infra/queue.js';
 import { registerPublishJob } from '../../src/jobs/publish.job.js';
 import { registerWritebackJob } from '../../src/jobs/writeback.job.js';
 import { PublishEngine } from '../../src/modules/publishing/engine.js';
-import type { FakeProvider } from '../../src/modules/publishing/providers/fake/fake-provider.js';
+import type { FakeProvider } from '@postelyo/publishing-core';
 import { NOTION_GOOD_DB, NOTION_VALID_TOKEN, createFakeProviders } from './fake-providers.js';
 import { createTestStack, uniqueEmail, waitFor, type TestStack } from './helpers.js';
 

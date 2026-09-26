@@ -42,6 +42,7 @@ export const RLS_TABLES = [
   'publication',
   'publish_attempt',
   'media_asset',
+  'media_object',
   'webhook_event',
   'audit_log',
 ] as const;

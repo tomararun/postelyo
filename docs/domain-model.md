@@ -92,7 +92,9 @@ A connected authoring system. MVP: exactly one per workspace, kind `notion`.
 | id | uuid PK | |
 | workspace_id | uuid FK | |
 | provider | enum `linkedin, x, instagram, facebook` | |
-| account_type | text | `member` (personal profile, one per workspace per provider) or `organization` (LinkedIn Page, any number; Phase 1). |
+| account_type | text | `member` (LinkedIn profile, X profile), `organization` (LinkedIn Page), `page` (Facebook Page), `business` (Instagram professional account). Any number per provider (Phase 2). |
+| parent_account_id | uuid null | Instagram accounts reference the Facebook Page whose token they use; disconnecting the parent disconnects them (Phase 2) |
+| metadata | jsonb | Non-secret provider details (username, vanity name) |
 | provider_account_id | text | e.g. LinkedIn person/organization id (URN suffix) |
 | display_name | text | Shown in UI and Notion notes |
 | avatar_url | text null | |
@@ -193,22 +195,34 @@ Append-only record of each provider call.
 | worker_id | text | |
 | INDEX (publication_id, started_at) | | |
 
-### 2.9 `media_asset` (minimal in MVP)
+### 2.9 `media_asset`
 
 | Column | Type | Notes |
 |--------|------|-------|
 | id | uuid PK | |
 | workspace_id | uuid FK | |
 | post_id | uuid FK | |
+| media_object_id | uuid FK null | Stored bytes once inspected (Phase 2) |
 | source_url | text | Notion file URL (expiring) |
 | content_hash | text | sha256 of bytes; idempotent provider upload key |
 | mime_type | text | |
 | byte_size | int | |
 | width, height | int null | |
-| provider_refs | jsonb | `{ "linkedin": "urn:li:image:..." }` cached upload results |
-| UNIQUE (workspace_id, content_hash) | | |
+| provider_refs | jsonb | `{ "linkedin": { ref, contentHash, uploadedAt } }` cached upload results |
+| last_error, inspected_at | | Inspection outcome (validation before the scheduled time) |
 
-MVP stores no bytes; it streams from Notion to the provider at publish time and caches the provider ref. Object storage arrives with the media library.
+### 2.9a `media_object` (Phase 2)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | |
+| content_hash | text | sha256; one object per workspace and hash |
+| storage_key | text | `ws/<workspace>/<hash>.<ext>` in object storage |
+| mime_type, byte_size, width, height | | Of the original |
+| variants | jsonb | Derived files keyed by spec (`jpeg-min320-w1440-a0.80-1.91`): `{ key, mimeType, width, height, byteSize }` |
+| last_referenced_at | timestamptz | Pruned after 7 days without a referencing asset |
+| UNIQUE (workspace_id, content_hash) | | |
 
 ### 2.10 `audit_log`
 

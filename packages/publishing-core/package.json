@@ -1,0 +1,32 @@
+{
+  "name": "@postelyo/publishing-core",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Publishing provider contract, canonical content types, rendering helpers, contract test suite and platform adapters",
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "development": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./contract-suite": {
+      "types": "./src/provider-contract.ts",
+      "development": "./src/provider-contract.ts",
+      "default": "./src/provider-contract.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:integration": "echo \"(no integration tests in publishing-core)\""
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "vitest": "^5.0.1"
+  }
+}

@@ -165,11 +165,15 @@ export const socialAccount = pgTable(
       .notNull()
       .references(() => workspace.id, { onDelete: 'cascade' }),
     provider: socialProvider('provider').notNull(),
-    /** `member` (personal profile) or `organization` (LinkedIn Page). */
+    /** `member` (personal profile), `organization` (LinkedIn Page), `page` (Facebook Page), `business` (Instagram). */
     accountType: text('account_type').notNull(),
     providerAccountId: text('provider_account_id').notNull(),
     displayName: text('display_name').notNull(),
     avatarUrl: text('avatar_url'),
+    /** Instagram accounts hang off the Facebook Page whose token they use (Phase 2). */
+    parentAccountId: uuid('parent_account_id'),
+    /** Non-secret provider details: username, vanity name, category. */
+    metadata: jsonb('metadata').notNull().default({}),
     status: socialAccountStatus('status').notNull(),
     scopes: text('scopes').array().notNull().default([]),
     accessTokenEnc: bytea('access_token_enc'),
@@ -425,6 +429,36 @@ export const publishAttempt = pgTable(
 
 export type PublishAttempt = typeof publishAttempt.$inferSelect;
 
+/**
+ * Stored image bytes, content-addressed per workspace (Phase 2 media pipeline).
+ * `variants` holds derived files keyed by spec (`jpeg-w1440-a0.80-1.91`), each
+ * `{ key, mimeType, width, height, byteSize }`. Unreferenced objects are pruned.
+ */
+export const mediaObject = pgTable(
+  'media_object',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    contentHash: text('content_hash').notNull(),
+    storageKey: text('storage_key').notNull(),
+    mimeType: text('mime_type').notNull(),
+    byteSize: integer('byte_size').notNull(),
+    width: integer('width'),
+    height: integer('height'),
+    variants: jsonb('variants').notNull().default({}),
+    lastReferencedAt: timestamp('last_referenced_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('media_object_workspace_hash_uq').on(t.workspaceId, t.contentHash),
+    index('media_object_referenced_idx').on(t.lastReferencedAt),
+  ],
+);
+
+export type MediaObject = typeof mediaObject.$inferSelect;
+
 export const mediaAsset = pgTable(
   'media_asset',
   {
@@ -435,6 +469,10 @@ export const mediaAsset = pgTable(
     postId: uuid('post_id')
       .notNull()
       .references(() => post.id, { onDelete: 'cascade' }),
+    /** Stored bytes once inspected; null until then or when inspection failed. */
+    mediaObjectId: uuid('media_object_id').references(() => mediaObject.id, {
+      onDelete: 'set null',
+    }),
     /** Source file URL as last seen (Notion-hosted URLs expire; re-read at publish time). */
     sourceUrl: text('source_url').notNull(),
     sourceKind: text('source_kind').notNull(),

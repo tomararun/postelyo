@@ -3,10 +3,13 @@ FROM node:22-alpine AS build
 WORKDIR /repo
 COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
+COPY packages/publishing-core/package.json packages/publishing-core/
 RUN npm ci
 COPY tsconfig.base.json ./
+COPY packages/publishing-core ./packages/publishing-core
 COPY apps/api ./apps/api
-RUN npm run build --workspace apps/api \
+RUN npm run build --workspace packages/publishing-core \
+ && npm run build --workspace apps/api \
  && npm prune --omit=dev
 
 # Runtime stage: same image serves both roles; the platform sets the command.
@@ -16,6 +19,8 @@ WORKDIR /repo
 RUN addgroup -S app && adduser -S app -G app
 COPY --from=build /repo/node_modules ./node_modules
 COPY --from=build /repo/package.json ./package.json
+COPY --from=build /repo/packages/publishing-core/package.json ./packages/publishing-core/package.json
+COPY --from=build /repo/packages/publishing-core/dist ./packages/publishing-core/dist
 COPY --from=build /repo/apps/api/package.json ./apps/api/package.json
 COPY --from=build /repo/apps/api/node_modules ./apps/api/node_modules
 COPY --from=build /repo/apps/api/dist ./apps/api/dist

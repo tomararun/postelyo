@@ -28,6 +28,8 @@ export interface SourcePost {
   postText: unknown;
   media: SourceMediaFile[];
   timeZone: string | null;
+  /** Per-platform text overrides by provider id (Phase 2), plain text; empty ones omitted. */
+  platformText: Record<string, string>;
   /** Current values of system-owned properties, used to patch only on change. */
   system: {
     postelyoStatus: string | null;
@@ -35,8 +37,18 @@ export interface SourcePost {
     publishedUrl: string | null;
     publishedAt: string | null;
     postelyoId: string;
+    /** Plain text of the optional `Published URLs` property (null when the column is absent). */
+    publishedUrls: string | null;
   };
 }
+
+/** Notion property → provider id for the per-platform text overrides. */
+export const PLATFORM_TEXT_PROPERTIES: Record<string, string> = {
+  'LinkedIn Text': 'linkedin',
+  'X Text': 'x',
+  'Facebook Text': 'facebook',
+  'Instagram Caption': 'instagram',
+};
 
 export type PropertyMap = Record<string, string>;
 
@@ -57,6 +69,12 @@ export function mapPage(page: NotionPage, map: PropertyMap): SourcePost {
   const mediaRaw = prop('Media')['files'];
   const tzProp = prop('Time Zone');
   const psStatus = asRecord(prop('Postelyo Status')['select']);
+
+  const platformText: Record<string, string> = {};
+  for (const [property, providerId] of Object.entries(PLATFORM_TEXT_PROPERTIES)) {
+    const text = richTextToPlain(prop(property)['rich_text']).trim();
+    if (text.length > 0) platformText[providerId] = text;
+  }
 
   const media: SourceMediaFile[] = Array.isArray(mediaRaw)
     ? mediaRaw.flatMap((f) => {
@@ -93,6 +111,7 @@ export function mapPage(page: NotionPage, map: PropertyMap): SourcePost {
       typeOf(tzProp) === 'select'
         ? ((asRecord(tzProp['select'])['name'] as string | undefined) ?? null)
         : richTextToPlain(tzProp['rich_text']) || null,
+    platformText,
     system: {
       postelyoStatus: typeof psStatus['name'] === 'string' ? psStatus['name'] : null,
       postelyoNote: richTextToPlain(prop('Postelyo Note')['rich_text']),
@@ -102,6 +121,9 @@ export function mapPage(page: NotionPage, map: PropertyMap): SourcePost {
           : null,
       publishedAt: (asRecord(prop('Published At')['date'])['start'] as string | undefined) ?? null,
       postelyoId: richTextToPlain(prop('Postelyo ID')['rich_text']),
+      publishedUrls: map['Published URLs']
+        ? richTextToPlain(prop('Published URLs')['rich_text'])
+        : null,
     },
   };
 }
@@ -228,6 +250,9 @@ export function buildCanonicalContent(input: BuildContentInput): MappedContent {
       kind: 'image',
       alt: m.name,
     })),
+    ...(Object.keys(input.page.platformText ?? {}).length > 0
+      ? { platformText: input.page.platformText }
+      : {}),
     meta: { source: 'notion', sourcePageId: input.page.externalId },
   };
   const plainLength = blocks
