@@ -16,7 +16,9 @@ export type AlertKind =
   | 'publication.writeback_failed'
   | 'content_source.sync_failed'
   | 'worker.heartbeat_missing'
-  | 'ops.daily_digest';
+  | 'ops.daily_digest'
+  | 'webhook.endpoint_disabled'
+  | 'queue.saturated';
 
 /** Re-alert cadence while a condition persists (architecture §10.4). */
 export const ALERT_WINDOWS_MS: Record<AlertKind, number> = {
@@ -27,6 +29,8 @@ export const ALERT_WINDOWS_MS: Record<AlertKind, number> = {
   'content_source.sync_failed': 60 * 60_000,
   'worker.heartbeat_missing': 30 * 60_000,
   'ops.daily_digest': 20 * 60 * 60_000,
+  'webhook.endpoint_disabled': 24 * 60 * 60_000,
+  'queue.saturated': 60 * 60_000,
 };
 
 export const OVERDUE_AFTER_MS = 15 * 60_000;

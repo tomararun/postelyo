@@ -20,6 +20,8 @@ export function Shell({
         ['Team', `/w/${workspace.id}/team`],
         ['Billing', `/w/${workspace.id}/billing`],
         ['Settings', `/w/${workspace.id}/settings`],
+        ['Developers', `/w/${workspace.id}/developers`],
+        ['Security', `/w/${workspace.id}/security`],
       ]
     : [];
   return (

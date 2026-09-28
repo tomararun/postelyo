@@ -22,12 +22,14 @@ export const JOB = {
   workspaceDelete: 'workspace-delete',
   /** Phase 5: its own queue so metrics never compete with publishing. */
   metricsFetch: 'metrics-fetch',
+  /** Phase 7: outbound webhook dispatch and delivery tick. */
+  webhookDispatch: 'webhook-dispatch',
 } as const;
 
 export type JobName = (typeof JOB)[keyof typeof JOB];
 
 /** Recurring ticks must never overlap. */
-const SINGLETON_QUEUES: readonly JobName[] = [JOB.notionSync, JOB.maintenance];
+const SINGLETON_QUEUES: readonly JobName[] = [JOB.notionSync, JOB.maintenance, JOB.webhookDispatch];
 /** One created + one active job per singleton key: duplicate sends are no-ops. */
 const STATELY_QUEUES: readonly JobName[] = [
   JOB.publish,

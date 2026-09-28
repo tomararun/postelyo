@@ -13,6 +13,7 @@ const config: NextConfig = {
   async rewrites() {
     return [
       { source: '/api/auth/:path*', destination: `${api}/api/auth/:path*` },
+      { source: '/api/v1/:path*', destination: `${api}/api/v1/:path*` },
       { source: '/v1/:path*', destination: `${api}/v1/:path*` },
       { source: '/oauth/:path*', destination: `${api}/oauth/:path*` },
       { source: '/webhooks/:path*', destination: `${api}/webhooks/:path*` },

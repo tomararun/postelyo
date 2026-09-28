@@ -49,6 +49,9 @@ const envSchema = z.object({
   ANTHROPIC_API_KEY: z.string().min(1).optional(),
   AI_PROVIDER: z.enum(['anthropic', 'fake']).optional(),
   AI_MODEL: z.string().min(1).optional(),
+  /** Phase 7: deployment region shown to workspaces (data residency) and an optional egress proxy for media fetches. */
+  REGION: z.string().min(1).default('us'),
+  MEDIA_EGRESS_PROXY_URL: z.string().url().optional(),
   /** Media object storage (Phase 2): `local` serves files from the api; `s3` for R2/MinIO/AWS. */
   STORAGE_DRIVER: z.enum(['local', 's3']).default('local'),
   STORAGE_LOCAL_DIR: z.string().min(1).default('.data/media'),

@@ -132,6 +132,24 @@ Deferred: image generation, translation, automatic A/B tests of variants.
 
 ---
 
+## Phase 7 – Scale, integrations and enterprise (built 2026-09-28)
+
+Goal: Postelyo fits into customers' other tools and meets enterprise security asks without changing anything for existing plans. Product plan: [product-roadmap.md](./product-roadmap.md) Phase 7.
+
+| Item | Notes | Hook | Status |
+|------|-------|------|--------|
+| Public API v1 | API keys (hash only, scopes, expiry, revoke), 60/min per key, `Idempotency-Key`, problem+json, OpenAPI 3.1 at `/api/v1/openapi.json`; posts, publications, campaigns, analytics, audit, webhooks; `POST /posts` creates a Notion page | §7.7 | Done |
+| Outbound webhooks | Whitelisted audit events, per-endpoint cursor, HMAC signature with timestamp, 8 retries with backoff, circuit breaker + alert, test delivery | `webhook-dispatch` job | Done |
+| Zapier and Make | Trigger/action definitions and REST-hook flows documented on the API | `docs/integrations.md` | Documented; marketplace apps deferred |
+| Scale-out readiness | Queue gauges from pg-boss, `queue.saturated` alert with the migration thresholds, audit archive (13 months, batches) | `QueueHealthService`, `AuditArchiveService` | Done; queue move and native partitioning deferred by design |
+| Enterprise security | Enterprise plan + features, per-tenant keys with rotation, OIDC SSO with PKCE/nonce/domain checks and default role, NDJSON audit export, egress proxy, SOC 2 control map | Security page, `docs/soc2-controls.md` | Done; SAML deferred |
+| Reliability and regions | `REGION`, `deploy/fly.eu.toml`, restore drill script, documented failover plan, chaos suite for the engine | runbook, `chaos.test.ts` | Done |
+| Dashboard | Developers (keys, webhooks, deliveries) and Security (region, tenant keys, SSO, export) pages; SSO-aware sign-in | `/w/{id}/developers`, `/w/{id}/security` | Done |
+
+Deferred: Zapier/Make marketplace listings, SAML, KMS-backed master keys and BYOK, automatic cross-region failover, native `audit_log` partitioning, queue migration (gated by metrics).
+
+---
+
 ## Later – Intelligence and growth
 
 | Item | Notes | Hook |

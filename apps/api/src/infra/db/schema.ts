@@ -660,6 +660,164 @@ export const aiGeneration = pgTable(
 
 export type AiGeneration = typeof aiGeneration.$inferSelect;
 
+// ---------------------------------------------------------------------------
+// Phase 7: public API, webhooks, enterprise security (domain-model §2.20–2.26)
+// ---------------------------------------------------------------------------
+
+/** Public API key: the secret is shown once; only its hash is stored. */
+export const apiKey = pgTable(
+  'api_key',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    /** `pk_live_ab12…` display prefix (first 12 characters). */
+    prefix: text('prefix').notNull(),
+    keyHash: text('key_hash').notNull().unique(),
+    scopes: text('scopes').array().notNull().default(['read']),
+    createdByUserId: uuid('created_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('api_key_workspace_idx').on(t.workspaceId)],
+);
+
+export type ApiKey = typeof apiKey.$inferSelect;
+
+/** Stored responses for `Idempotency-Key` replays (24 h). */
+export const idempotencyKey = pgTable(
+  'idempotency_key',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    key: text('key').notNull(),
+    requestHash: text('request_hash').notNull(),
+    method: text('method').notNull(),
+    path: text('path').notNull(),
+    responseStatus: integer('response_status').notNull(),
+    responseBody: jsonb('response_body'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('idempotency_key_uq').on(t.workspaceId, t.key),
+    index('idempotency_created_idx').on(t.createdAt),
+  ],
+);
+
+/** Outbound webhook endpoint with a sealed signing secret and a circuit breaker. */
+export const webhookEndpoint = pgTable(
+  'webhook_endpoint',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    url: text('url').notNull(),
+    description: text('description'),
+    secretEnc: bytea('secret_enc').notNull(),
+    /** Subscribed audit events; empty = every deliverable event. */
+    events: text('events').array().notNull().default([]),
+    enabled: boolean('enabled').notNull().default(true),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    disabledAt: timestamp('disabled_at', { withTimezone: true }),
+    disabledReason: text('disabled_reason'),
+    lastDeliveryAt: timestamp('last_delivery_at', { withTimezone: true }),
+    lastStatusCode: integer('last_status_code'),
+    /** Audit log id up to which events were turned into deliveries (uuidv7, time-ordered). */
+    cursorAuditId: text('cursor_audit_id'),
+    createdByUserId: uuid('created_by_user_id').references(() => user.id, { onDelete: 'set null' }),
+    ...timestamps,
+  },
+  (t) => [index('webhook_endpoint_workspace_idx').on(t.workspaceId)],
+);
+
+export type WebhookEndpoint = typeof webhookEndpoint.$inferSelect;
+
+export const webhookDelivery = pgTable(
+  'webhook_delivery',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    endpointId: uuid('endpoint_id')
+      .notNull()
+      .references(() => webhookEndpoint.id, { onDelete: 'cascade' }),
+    auditId: text('audit_id'),
+    event: text('event').notNull(),
+    payload: jsonb('payload').notNull(),
+    attempts: integer('attempts').notNull().default(0),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    /** `pending`, `delivered`, `dead` (attempt budget spent) */
+    status: text('status').notNull().default('pending'),
+    lastStatusCode: integer('last_status_code'),
+    lastError: text('last_error'),
+    deliveredAt: timestamp('delivered_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('webhook_delivery_endpoint_idx').on(t.endpointId, t.createdAt),
+    index('webhook_delivery_due_idx').on(t.status, t.nextAttemptAt),
+  ],
+);
+
+export type WebhookDelivery = typeof webhookDelivery.$inferSelect;
+
+/** Per-tenant data key (enterprise): a random 32-byte key wrapped by the master key. */
+export const workspaceKey = pgTable('workspace_key', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspace.id, { onDelete: 'cascade' }),
+  version: integer('version').notNull().default(1),
+  wrappedKey: bytea('wrapped_key').notNull(),
+  masterKeyId: text('master_key_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  rotatedAt: timestamp('rotated_at', { withTimezone: true }),
+});
+
+export type WorkspaceKey = typeof workspaceKey.$inferSelect;
+
+/** OpenID Connect sign-in for a workspace, matched by email domain. */
+export const ssoConnection = pgTable('sso_connection', {
+  workspaceId: uuid('workspace_id')
+    .primaryKey()
+    .references(() => workspace.id, { onDelete: 'cascade' }),
+  issuer: text('issuer').notNull(),
+  clientId: text('client_id').notNull(),
+  clientSecretEnc: bytea('client_secret_enc').notNull(),
+  emailDomain: text('email_domain').notNull().unique(),
+  /** Role given to a user who signs in through SSO for the first time. */
+  defaultRole: membershipRole('default_role').notNull().default('viewer'),
+  enabled: boolean('enabled').notNull().default(true),
+  ...timestamps,
+});
+
+export type SsoConnection = typeof ssoConnection.$inferSelect;
+
+/** Pending OIDC authorization (no user yet, so not `oauth_state`). */
+export const ssoState = pgTable(
+  'sso_state',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspace.id, { onDelete: 'cascade' }),
+    pkceVerifier: text('pkce_verifier').notNull(),
+    nonce: text('nonce').notNull(),
+    redirectTo: text('redirect_to').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('sso_state_expires_idx').on(t.expiresAt)],
+);
+
 export const attemptOutcome = pgEnum('attempt_outcome', [
   'succeeded',
   'failed_retryable',
@@ -855,3 +1013,24 @@ export const auditLog = pgTable(
 );
 
 export type AuditLogRow = typeof auditLog.$inferSelect;
+
+/** Audit rows older than the retention window, moved here by maintenance (no FK: workspaces may be gone). */
+export const auditLogArchive = pgTable(
+  'audit_log_archive',
+  {
+    id: uuid('id').primaryKey(),
+    workspaceId: uuid('workspace_id'),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+    actorType: auditActorType('actor_type').notNull(),
+    actorId: text('actor_id'),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    event: text('event').notNull(),
+    fromState: text('from_state'),
+    toState: text('to_state'),
+    correlationId: text('correlation_id'),
+    data: jsonb('data').notNull().default({}),
+    archivedAt: timestamp('archived_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('audit_log_archive_ws_idx').on(t.workspaceId, t.occurredAt)],
+);

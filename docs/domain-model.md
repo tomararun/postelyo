@@ -398,6 +398,62 @@ Phase 5 columns on existing tables: `publication.metrics_tier` (completed tiers)
 
 Phase 6 columns on existing tables: `post.ai_assisted`, `media_asset.alt_text`; `workspace.settings.ai` (`enabled`, `model`, `voice`, `bannedPhrases`, `monthlyTokenBudget`); `PlanLimits.aiTokensPerMonth`.
 
+### 2.20 `api_key` (Phase 7)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS |
+| name, prefix | text | Display; `prefix` = first 12 characters of the secret |
+| key_hash | text unique | SHA-256 of `pk_live_…`; the secret is never stored |
+| scopes | text[] | `read`, `write` |
+| created_by_user_id | uuid FK null | |
+| last_used_at, expires_at, revoked_at | timestamptz null | `last_used_at` updated at most once a minute |
+| created_at | timestamptz | |
+
+### 2.21 `idempotency_key` (Phase 7)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| id | uuid PK | |
+| workspace_id | uuid FK | RLS; unique with `key` |
+| key | text | The `Idempotency-Key` header (≤ 200 chars) |
+| request_hash | text | SHA-256 of method, path and body; a mismatch answers 422 |
+| method, path | text | |
+| response_status | integer | |
+| response_body | jsonb null | Replayed verbatim |
+| created_at | timestamptz | Rows older than 24 h are pruned by maintenance |
+
+### 2.22 `webhook_endpoint` and `webhook_delivery` (Phase 7)
+
+`webhook_endpoint`: `id`, `workspace_id` (RLS), `url` (https), `description`, `secret_enc` (envelope-encrypted `whsec_…`), `events` (text[]; empty = every deliverable event), `enabled`, `consecutive_failures`, `disabled_at`, `disabled_reason`, `last_delivery_at`, `last_status_code`, `cursor_audit_id` (last audit id turned into deliveries), `created_by_user_id`, timestamps.
+
+`webhook_delivery`: `id`, `workspace_id`, `endpoint_id` (cascade), `audit_id` (null for `webhook.test`), `event`, `payload` (jsonb, the body that is sent), `attempts`, `next_attempt_at`, `status` (`pending`, `delivered`, `dead`), `last_status_code`, `last_error`, `delivered_at`, `created_at`. Indexed by `(status, next_attempt_at)` for the deliverer and `(endpoint_id, created_at)` for the UI.
+
+### 2.23 `workspace_key` (Phase 7)
+
+| Column | Type | Notes |
+|--------|------|-------|
+| workspace_id | uuid PK FK | RLS |
+| version | integer | Envelope key id is `t<version>` |
+| wrapped_key | bytea | The 32-byte tenant key wrapped by the master `KeyProvider` |
+| master_key_id | text | Which master key wrapped it |
+| created_at, rotated_at | timestamptz | |
+
+### 2.24 `sso_connection` and `sso_state` (Phase 7)
+
+`sso_connection`: `workspace_id` PK, `issuer` (https), `client_id`, `client_secret_enc` (envelope-encrypted), `email_domain` (unique across the installation), `default_role` (admin/editor/viewer), `enabled`, timestamps.
+
+`sso_state`: `id` (the OAuth `state`), `workspace_id`, `pkce_verifier`, `nonce`, `redirect_to` (same-origin path), `expires_at` (10 min), `consumed_at`, `created_at`. Distinct from `oauth_state` because no user exists yet.
+
+### 2.25 `audit_log_archive` (Phase 7)
+
+Same columns as `audit_log` plus `archived_at`; no foreign keys (workspaces may be gone). Maintenance moves rows older than 13 months here in batches of 5 000; exports read both tables. Not tenant-scoped by RLS (operator table), always filtered by `workspace_id` in queries.
+
+### 2.26 Phase 7 additions to existing tables and enums
+
+`PlanId` gains `enterprise`; `PLANS[plan].features` lists `publicApi`, `webhooks`, `auditExport`, `sso`, `tenantKeys`. `audit_log.actor_type` already had `api_key`; new events: `api_key.created/revoked`, `webhook.endpoint_created/updated/deleted/disabled`, `workspace_key.enabled/rotated`, `sso.connection_updated`, `sso.signed_in`, `audit.exported`, `audit.archived`, `queue.saturated`. New entity types: `api_key`, `webhook_endpoint`, `sso_connection`. `CredentialRef.entityType` accepts `webhook_endpoint` and `sso_connection`.
+
 ### 2.13 Queue tables
 
 Owned by pg-boss in its own schema (`pgboss`). Not part of the domain; never queried by domain code.

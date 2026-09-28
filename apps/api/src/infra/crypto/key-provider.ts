@@ -57,6 +57,32 @@ export function parseEncryptionKeys(raw: string): MasterKey[] {
   });
 }
 
+/** AES-256-GCM wrap of a 32-byte data key under `key`, bound to `keyId` as AAD. */
+export function wrapDek(key: Buffer, keyId: string, dek: Buffer): Buffer {
+  const nonce = randomBytes(NONCE_BYTES);
+  const cipher = createCipheriv('aes-256-gcm', key, nonce);
+  cipher.setAAD(Buffer.from(keyId, 'utf8'));
+  const ct = Buffer.concat([cipher.update(dek), cipher.final()]);
+  return Buffer.concat([nonce, ct, cipher.getAuthTag()]);
+}
+
+export function unwrapDek(key: Buffer, keyId: string, wrapped: Buffer): Buffer {
+  if (wrapped.length !== NONCE_BYTES + 32 + TAG_BYTES) {
+    throw new KeyProviderError('malformed wrapped data key');
+  }
+  const nonce = wrapped.subarray(0, NONCE_BYTES);
+  const ct = wrapped.subarray(NONCE_BYTES, NONCE_BYTES + 32);
+  const tag = wrapped.subarray(NONCE_BYTES + 32);
+  const decipher = createDecipheriv('aes-256-gcm', key, nonce);
+  decipher.setAAD(Buffer.from(keyId, 'utf8'));
+  decipher.setAuthTag(tag);
+  try {
+    return Buffer.concat([decipher.update(ct), decipher.final()]);
+  } catch {
+    throw new KeyProviderError('data key unwrap failed (wrong key or tampered)');
+  }
+}
+
 export class EnvKeyProvider implements KeyProvider {
   private readonly keys = new Map<string, Buffer>();
   readonly currentKeyId: string;

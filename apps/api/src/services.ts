@@ -4,6 +4,13 @@ import type { KeyProvider } from './infra/crypto/key-provider.js';
 import type { Logger } from './infra/logger.js';
 import type { Mailer } from './infra/mailer.js';
 import { CredentialVault } from './modules/connections/credential-vault.js';
+import { proxiedFetch } from './infra/egress.js';
+import { TenantKeyService } from './modules/enterprise/tenant-key.service.js';
+import { ApiKeyService } from './modules/enterprise/api-key.service.js';
+import { WebhookService } from './modules/enterprise/webhook.service.js';
+import { SsoService } from './modules/enterprise/sso.service.js';
+import { AuditArchiveService } from './modules/enterprise/audit-archive.service.js';
+import { QueueHealthService } from './modules/ops/queue-health.service.js';
 import { SocialAccountService } from './modules/connections/social-account.service.js';
 import { ContentSourceService } from './modules/content-sources/content-source.service.js';
 import { NotionSyncService } from './modules/content-sources/notion/notion-sync.service.js';
@@ -86,6 +93,7 @@ export interface ServiceDeps {
     | 'ANTHROPIC_API_KEY'
     | 'AI_PROVIDER'
     | 'AI_MODEL'
+    | 'MEDIA_EGRESS_PROXY_URL'
   >;
   /** Overrides the storage built from env (tests). */
   storage?: ObjectStorage | undefined;
@@ -148,6 +156,13 @@ export interface Services {
   ai: AiService;
   aiCompanion: AiCompanionService;
   aiProvider: AiProvider | null;
+  /** Phase 7 */
+  tenantKeys: TenantKeyService;
+  apiKeys: ApiKeyService;
+  webhooks: WebhookService;
+  sso: SsoService;
+  auditArchive: AuditArchiveService;
+  queueHealth: QueueHealthService;
 }
 
 /** One composition root shared by the api and worker roles (architecture §2.1). */
@@ -155,7 +170,9 @@ export function buildServices(deps: ServiceDeps): Services {
   const clock = deps.clock ?? systemClock;
   const fetchOpt = deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {};
   const workspaces = new WorkspaceService(deps.db);
-  const vault = new CredentialVault(deps.db, deps.keyProvider);
+  const tenantKeys = new TenantKeyService({ db: deps.db, master: deps.keyProvider, clock });
+  const vault = new CredentialVault(deps.db, deps.keyProvider, tenantKeys);
+  tenantKeys.attach(vault);
   const socialAccounts = new SocialAccountService(deps.db, vault, clock);
   // X access tokens last ~2 h: the worker refreshes them before publishing.
   const xc = xConfig(deps.env);
@@ -187,13 +204,19 @@ export function buildServices(deps: ServiceDeps): Services {
           new InstagramProvider(fetchOpt),
         ]);
   const storage = deps.storage ?? createStorage(deps.env);
+  // Phase 7: media fetches can leave through a fixed egress proxy (allow-listed IP for customers).
+  const mediaFetch = deps.fetchImpl
+    ? { fetchImpl: deps.fetchImpl }
+    : deps.env.MEDIA_EGRESS_PROXY_URL
+      ? { fetchImpl: proxiedFetch(deps.env.MEDIA_EGRESS_PROXY_URL) }
+      : {};
   const media = new MediaService({
     db: deps.db,
     contentSources,
     storage,
     clock,
     logger: deps.logger,
-    ...fetchOpt,
+    ...mediaFetch,
   });
   // Billing (Phase 3): Stripe when keys are present, otherwise the fake gateway in fake
   // provider mode (development) and nothing in live mode (billing pages read-only).
@@ -222,6 +245,7 @@ export function buildServices(deps: ServiceDeps): Services {
   socialAccounts.registerCapacityGuard((workspaceId, adding) =>
     billing.assertAccountCapacity(workspaceId, adding),
   );
+  tenantKeys.setBilling(billing);
   // Phase 4 companions.
   const links = new LinkService({ db: deps.db, clock, appBaseUrl: deps.env.APP_BASE_URL });
   const campaigns = new CampaignService({ db: deps.db, clock, logger: deps.logger });
@@ -439,6 +463,29 @@ export function buildServices(deps: ServiceDeps): Services {
     environment,
   });
   const metrics = new MetricsService(deps.db, heartbeat, clock);
+  // Phase 7: public API, webhooks, SSO, audit archive, queue health.
+  const apiKeys = new ApiKeyService({ db: deps.db, clock, billing });
+  const webhooks = new WebhookService({
+    db: deps.db,
+    vault,
+    clock,
+    logger: deps.logger,
+    billing,
+    alerts,
+    ...fetchOpt,
+  });
+  const sso = new SsoService({
+    db: deps.db,
+    vault,
+    clock,
+    logger: deps.logger,
+    appBaseUrl: deps.env.APP_BASE_URL,
+    billing,
+    ...fetchOpt,
+  });
+  const auditArchive = new AuditArchiveService({ db: deps.db, clock, logger: deps.logger });
+  const queueHealth = new QueueHealthService({ db: deps.db, logger: deps.logger });
+  metrics.registerExtra(() => queueHealth.render());
 
   return {
     workspaces,
@@ -468,6 +515,12 @@ export function buildServices(deps: ServiceDeps): Services {
     metrics,
     enqueue: deps.enqueue,
     clock,
+    tenantKeys,
+    apiKeys,
+    webhooks,
+    sso,
+    auditArchive,
+    queueHealth,
     links,
     campaigns,
     series,

@@ -17,14 +17,21 @@ import type { HeartbeatService } from './heartbeat.service.js';
  * request-level counters are needed.
  */
 export class MetricsService {
+  private readonly extras: (() => Promise<string>)[] = [];
+
   constructor(
     private readonly db: Db,
     private readonly heartbeat: HeartbeatService,
     private readonly clock: Clock,
   ) {}
 
+  /** Phase 7: other modules append their own exposition (queue health). */
+  registerExtra(render: () => Promise<string>): void {
+    this.extras.push(render);
+  }
+
   async render(): Promise<string> {
-    const { db } = this.db ? { db: this.db } : { db: this.db };
+    const db = this.db;
     const now = this.clock.now();
     const lines: string[] = [];
     const gauge = (
@@ -129,6 +136,8 @@ export class MetricsService {
       [{ value: age ?? -1 }],
     );
 
-    return lines.join('\n') + '\n';
+    let out = lines.join('\n') + '\n';
+    for (const extra of this.extras) out += await extra();
+    return out;
   }
 }

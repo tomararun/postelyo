@@ -1,0 +1,62 @@
+# Fly.io configuration for the EU deployment (Phase 7 data residency, architecture §7.7).
+# Same image and process groups as fly.toml; only the app name, region and REGION differ.
+# Each region is a separate installation with its own database, object storage bucket and
+# secrets; workspaces live in exactly one region and the dashboard app for that region
+# points at this app. Deploy with: flyctl deploy --config deploy/fly.eu.toml --app postelyo-eu
+# Secrets: the same list as fly.toml, set per app (never shared between regions).
+# MEDIA_EGRESS_PROXY_URL is optional: route media downloads through a fixed-IP proxy.
+
+app = "postelyo-eu"
+primary_region = "fra"
+kill_signal = "SIGTERM"
+kill_timeout = "40s"
+
+[build]
+  dockerfile = "../apps/api/Dockerfile"
+
+[deploy]
+  release_command = "node apps/api/dist/infra/db/migrate.js"
+  strategy = "rolling"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3000"
+  LOG_LEVEL = "info"
+  MAIL_TRANSPORT = "smtp"
+  PROVIDER_MODE = "live"
+  STORAGE_DRIVER = "s3"
+  REGION = "eu"
+
+[processes]
+  api = "node apps/api/dist/main-api.js"
+  worker = "node apps/api/dist/main-worker.js"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["api"]
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 400
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "15s"
+    method = "GET"
+    path = "/health/ready"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["api"]
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  processes = ["worker"]

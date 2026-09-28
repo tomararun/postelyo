@@ -32,6 +32,9 @@ import { postRoutes } from './routes/posts.js';
 import { publicationRoutes } from './routes/publications.js';
 import { webhookRoutes } from './routes/webhooks.js';
 import { workspaceRoutes } from './routes/workspaces.js';
+import { enterpriseRoutes } from './routes/enterprise.js';
+import { publicApiRoutes } from './routes/public-api.js';
+import { ssoRoutes } from './routes/sso.js';
 
 export interface ServerDeps {
   env: Env;
@@ -168,7 +171,11 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
   });
   await app.register(oauthRoutes, { linkedin, x, meta, notion });
   await app.register(meRoutes, { workspaces });
-  await app.register(workspaceRoutes, { workspaces, deletion: deps.services.deletion });
+  await app.register(workspaceRoutes, {
+    workspaces,
+    deletion: deps.services.deletion,
+    region: deps.env.REGION,
+  });
   await app.register(teamRoutes, { workspaces, invitations: deps.services.invitations });
   await app.register(billingRoutes, { workspaces, billing: deps.services.billing });
   await app.register(connectionRoutes, {
@@ -191,5 +198,33 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     aiCompanion: deps.services.aiCompanion,
   });
   await app.register(publicationRoutes, { workspaces, publications });
+  // Phase 7: SSO, developer/security management, and the public API.
+  await app.register(ssoRoutes, { sso: deps.services.sso, appBaseUrl: deps.env.APP_BASE_URL });
+  await app.register(enterpriseRoutes, {
+    workspaces,
+    billing: deps.services.billing,
+    apiKeys: deps.services.apiKeys,
+    webhooks: deps.services.webhooks,
+    sso: deps.services.sso,
+    tenantKeys: deps.services.tenantKeys,
+    auditArchive: deps.services.auditArchive,
+    region: deps.env.REGION,
+    appBaseUrl: deps.env.APP_BASE_URL,
+  });
+  await app.register(publicApiRoutes, {
+    apiKeys: deps.services.apiKeys,
+    workspaces,
+    postQuery,
+    publications,
+    campaigns: deps.services.campaigns,
+    analytics: deps.services.analytics,
+    auditArchive: deps.services.auditArchive,
+    webhooks: deps.services.webhooks,
+    contentSources,
+    billing: deps.services.billing,
+    appBaseUrl: deps.env.APP_BASE_URL,
+    region: deps.env.REGION,
+    ...fetchOpt,
+  });
   return app;
 }

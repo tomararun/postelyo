@@ -6,7 +6,10 @@ import type { Subscription } from '../../infra/db/schema.js';
  * in the UI are placeholders until pricing is decided.
  */
 
-export type PlanId = 'free' | 'solo' | 'team' | 'agency';
+export type PlanId = 'free' | 'solo' | 'team' | 'agency' | 'enterprise';
+
+/** Phase 7 entitlements; every one is off unless the plan lists it. */
+export type PlanFeature = 'publicApi' | 'webhooks' | 'auditExport' | 'sso' | 'tenantKeys';
 
 export interface PlanLimits {
   /** Connected social accounts (active, any provider). */
@@ -22,9 +25,11 @@ export interface PlanLimits {
 export interface Plan {
   id: PlanId;
   name: string;
-  /** Monthly price in USD for display only. */
+  /** Monthly price in USD for display only; 0 with `custom` means "contact us". */
   priceUsd: number;
+  custom?: boolean;
   limits: PlanLimits;
+  features: readonly PlanFeature[];
 }
 
 export const PLANS: Record<PlanId, Plan> = {
@@ -33,26 +38,47 @@ export const PLANS: Record<PlanId, Plan> = {
     name: 'Free',
     priceUsd: 0,
     limits: { accounts: 1, postsPerMonth: 10, members: 1, aiTokensPerMonth: 0 },
+    features: [],
   },
   solo: {
     id: 'solo',
     name: 'Solo',
     priceUsd: 19,
     limits: { accounts: 3, postsPerMonth: 100, members: 2, aiTokensPerMonth: 200_000 },
+    features: [],
   },
   team: {
     id: 'team',
     name: 'Team',
     priceUsd: 49,
     limits: { accounts: 10, postsPerMonth: 500, members: 5, aiTokensPerMonth: 1_000_000 },
+    features: ['publicApi', 'webhooks', 'auditExport'],
   },
   agency: {
     id: 'agency',
     name: 'Agency',
     priceUsd: 149,
     limits: { accounts: 50, postsPerMonth: 5000, members: Infinity, aiTokensPerMonth: 5_000_000 },
+    features: ['publicApi', 'webhooks', 'auditExport'],
+  },
+  enterprise: {
+    id: 'enterprise',
+    name: 'Enterprise',
+    priceUsd: 0,
+    custom: true,
+    limits: {
+      accounts: 200,
+      postsPerMonth: 50_000,
+      members: Infinity,
+      aiTokensPerMonth: 20_000_000,
+    },
+    features: ['publicApi', 'webhooks', 'auditExport', 'sso', 'tenantKeys'],
   },
 };
+
+export function planHas(plan: PlanId, feature: PlanFeature): boolean {
+  return PLANS[plan].features.includes(feature);
+}
 
 export const PAID_PLANS: readonly PlanId[] = ['solo', 'team', 'agency'];
 

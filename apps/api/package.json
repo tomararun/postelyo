@@ -21,7 +21,8 @@
     "db:studio": "drizzle-kit studio",
     "preflight": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/preflight.ts",
     "notion:template": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/create-notion-template.ts",
-    "seed": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/seed.ts"
+    "seed": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/seed.ts",
+    "restore:drill": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/restore-drill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
@@ -35,12 +36,14 @@
     "better-auth": "^1.7.5",
     "drizzle-orm": "^0.45.3",
     "fastify": "^5.12.5",
+    "jose": "^6.2.12",
     "nodemailer": "^10.0.10",
     "pg-boss": "^12.33.3",
     "pino": "^10.3.1",
     "postgres": "^3.4.9",
     "sharp": "^0.35.4",
     "stripe": "^22.6.2",
+    "undici": "^7.30.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

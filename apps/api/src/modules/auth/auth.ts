@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { magicLink } from 'better-auth/plugins';
@@ -18,6 +19,13 @@ export interface AuthDeps {
 }
 
 const SESSION_DAYS = 30;
+
+/**
+ * Phase 7 SSO: when a magic link is requested inside `magicLinkCapture.run`,
+ * the link is handed back to the caller instead of being emailed, so an
+ * OIDC-verified identity can be turned into a session with no second factor.
+ */
+export const magicLinkCapture = new AsyncLocalStorage<{ url?: string }>();
 
 /**
  * Better Auth instance (architecture §5.1, security.md §3): magic-link only,
@@ -70,6 +78,11 @@ export function createAuth(deps: AuthDeps) {
         expiresIn: 15 * 60,
         storeToken: 'hashed',
         sendMagicLink: async ({ email, url }) => {
+          const capture = magicLinkCapture.getStore();
+          if (capture) {
+            capture.url = url;
+            return;
+          }
           await deps.mailer.send({
             to: email,
             subject: 'Sign in to Postelyo',

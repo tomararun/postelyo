@@ -14,6 +14,9 @@ import type { PublishEngine } from '../modules/publishing/engine.js';
 import type { AnalyticsWritebackService } from '../modules/analytics/analytics-writeback.service.js';
 import type { PostMetricsService } from '../modules/analytics/metrics.service.js';
 import type { WeeklyReportService } from '../modules/analytics/weekly-report.service.js';
+import type { ApiKeyService } from '../modules/enterprise/api-key.service.js';
+import type { AuditArchiveService } from '../modules/enterprise/audit-archive.service.js';
+import type { QueueHealthService } from '../modules/ops/queue-health.service.js';
 
 /** Every 5 minutes: reconciliation, alert evaluation, token lifecycle notices, daily digest, housekeeping. */
 export const MAINTENANCE_CRON = '*/5 * * * *';
@@ -33,6 +36,10 @@ export interface MaintenanceDeps {
   postMetrics?: PostMetricsService;
   analyticsWriteback?: AnalyticsWritebackService;
   weeklyReport?: WeeklyReportService;
+  /** Phase 7 */
+  apiKeys?: ApiKeyService;
+  auditArchive?: AuditArchiveService;
+  queueHealth?: QueueHealthService;
 }
 
 export async function runMaintenance(
@@ -57,6 +64,11 @@ export async function runMaintenance(
     ? (await deps.analyticsWriteback.run(correlationId)).rowsWritten
     : 0;
   const weeklyReports = deps.weeklyReport ? await deps.weeklyReport.run(correlationId) : 0;
+  const idempotencyPruned = deps.apiKeys ? await deps.apiKeys.pruneIdempotency() : 0;
+  const auditArchived = deps.auditArchive ? await deps.auditArchive.archive(correlationId) : 0;
+  const queueSaturated = deps.queueHealth
+    ? await deps.queueHealth.check(deps.alerts, correlationId)
+    : [];
   logger.info(
     {
       correlationId,
@@ -72,6 +84,9 @@ export async function runMaintenance(
       metricsPruned,
       analyticsRows,
       weeklyReports,
+      idempotencyPruned,
+      auditArchived,
+      queueSaturated,
       durationMs: Date.now() - started,
     },
     'maintenance run',

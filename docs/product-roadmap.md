@@ -294,7 +294,9 @@ Ship behind a per-workspace flag and a plan entitlement.
 
 ---
 
-## Phase 7 – Scale, integrations and enterprise
+## Phase 7 – Scale, integrations and enterprise (built 2026-09-28)
+
+**Status.** Built and tested against fakes: public API with keys, scopes, rate limits, idempotency and OpenAPI; outbound webhooks from the audit stream with signatures, retries and circuit breakers; Zapier/Make definitions; queue gauges and saturation alert (migration gated by them); audit archive and export; Enterprise plan with per-tenant keys and OIDC SSO; egress proxy; regional deployment config, restore drill and failover plan; chaos suite; SOC 2 control map. Deferred: marketplace apps, SAML, native partitioning, the queue migration itself. Details in [roadmap.md](./roadmap.md) Phase 7 and architecture §7.7.
 
 **Goal.** Postelyo runs for thousands of workspaces and fits into customers' other tools.
 

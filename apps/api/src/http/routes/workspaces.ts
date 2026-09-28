@@ -89,10 +89,12 @@ function problem(
 }
 
 /** Public DTO: never leaks internal columns beyond what the UI needs. */
-export function workspaceDto(w: Workspace) {
+export function workspaceDto(w: Workspace, region?: string) {
   const settings = readSettings(w);
   return {
     id: w.id,
+    /** Phase 7: deployment region of this installation (data residency). */
+    region: region ?? null,
     slug: w.slug,
     name: w.name,
     defaultTimezone: w.defaultTimezone,
@@ -121,6 +123,7 @@ export function workspaceDto(w: Workspace) {
 export interface WorkspaceRoutesOptions {
   workspaces: WorkspaceService;
   deletion: WorkspaceDeletionService;
+  region?: string;
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRoutesOptions> = async (app, opts) => {
@@ -159,7 +162,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRoutesOptions> = async
   app.get(
     '/v1/workspaces/:workspaceId',
     { preHandler: requireMembership(workspaces, 'viewer') },
-    async (req) => workspaceDto(await workspaces.get(req.tenant!)),
+    async (req) => workspaceDto(await workspaces.get(req.tenant!), opts.region),
   );
 
   app.patch(
@@ -173,7 +176,7 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRoutesOptions> = async
         );
       }
       try {
-        return workspaceDto(await workspaces.update(req.tenant!, parsed.data));
+        return workspaceDto(await workspaces.update(req.tenant!, parsed.data), opts.region);
       } catch (err) {
         if (err instanceof ValidationError) {
           return problem(reply, req, 422, 'Validation failed', {

@@ -325,11 +325,12 @@ export class ContentSourceService {
       const values = {
         status: 'active' as const,
         externalDatabaseTitle: db.title || null,
-        credentialEnc: this.deps.vault.seal(
+        credentialEnc: await this.deps.vault.sealFor(
+          ctx.workspaceId,
           { entityType: 'content_source', entityId: id, column: 'credential' },
           token,
         ),
-        credentialKeyId: this.deps.vault.currentKeyId,
+        credentialKeyId: await this.deps.vault.keyIdFor(ctx.workspaceId),
         config,
         lastError: null,
         connectedByUserId: userId,
@@ -421,11 +422,12 @@ export class ContentSourceService {
         setupPending: existing?.externalDatabaseId ? false : true,
       };
       const values = {
-        credentialEnc: this.deps.vault.seal(
+        credentialEnc: await this.deps.vault.sealFor(
+          ctx.workspaceId,
           { entityType: 'content_source', entityId: id, column: 'credential' },
           tokens.accessToken,
         ),
-        credentialKeyId: this.deps.vault.currentKeyId,
+        credentialKeyId: await this.deps.vault.keyIdFor(ctx.workspaceId),
         config,
         lastError: null,
         connectedByUserId: userId,

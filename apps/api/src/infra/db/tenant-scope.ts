@@ -52,5 +52,12 @@ export const RLS_TABLES = [
   'short_link',
   'publication_metric',
   'ai_generation',
+  'api_key',
+  'idempotency_key',
+  'webhook_endpoint',
+  'webhook_delivery',
+  'workspace_key',
+  'sso_connection',
+  'sso_state',
   'audit_log',
 ] as const;

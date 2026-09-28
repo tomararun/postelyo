@@ -132,11 +132,12 @@ stored:       key_id || wrapped_dek || nonce || ciphertext || tag   (single byte
 - `aad` binds ciphertext to its row and column so values cannot be swapped between rows.
 - Rotation: add a new key as first entry; a maintenance job re-wraps DEKs lazily; remove the old key after all rows report the new `key_id`.
 - The `KeyProvider` interface has one implementation in the MVP (`EnvKeyProvider`); `KmsKeyProvider` (AWS/GCP/Vault) is a drop-in later.
+- Phase 7 per-tenant keys (Enterprise): `workspace_key` holds a random 32-byte key wrapped by the master provider; `TenantKeyProvider` wraps DEKs under it with key ids `t<version>`. `CredentialVault.sealFor(workspaceId, …)` picks the tenant provider when one exists, `withCredential` resolves it from the tenant context, and enabling or rotating re-seals every credential of the workspace (social tokens, Notion token, webhook secrets, SSO client secret) synchronously. The master key alone cannot open a tenant-sealed blob.
 - Database-level encryption (provider disk encryption) is assumed in addition, not instead.
 
 ### 6.3 Access to plaintext
 
-Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decrypts, runs `fn`, and drops the plaintext. Each call writes `audit_log` event `credential.accessed` with `reason` (`publish`, `refresh`, `validate_connection`, `revoke`). Any other path is a code-review blocker.
+Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decrypts, runs `fn`, and drops the plaintext. Each call writes `audit_log` event `credential.accessed` with `reason` (`publish`, `refresh`, `validate_connection`, `sync`, `revoke`). Any other path is a code-review blocker. Phase 7 secrets follow the same rule: webhook signing secrets are opened only to sign a delivery, SSO client secrets only to exchange a code, and API keys are never stored at all (SHA-256 hash only).
 
 ---
 
@@ -150,7 +151,7 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 | No secrets in logs | pino `redact` on `authorization`, `cookie`, `set-cookie`, `*.token`, `*.access_token`, `*.refresh_token`, `*.client_secret`, `*.credential*` |
 | No secrets in error tracking | Sentry `beforeSend` scrubber + `sendDefaultPii=false` |
 | No secrets in Notion | Writeback uses an allow-list of properties (`Postelyo Status`, `Postelyo Note`, `Published URL`, `Published At`, `Postelyo ID`) with typed values; free text goes through a redaction filter that rejects anything matching token patterns |
-| No secrets in URLs | OAuth codes are exchanged immediately and never logged with the query string; access logs strip query strings on `/oauth/*` |
+| No secrets in URLs | OAuth codes are exchanged immediately and never logged with the query string; access logs strip query strings on `/oauth/*`; API keys and webhook secrets are returned once in a JSON body and shown by a client component, never carried in a redirect (`SecretForm`) |
 | No secrets in the browser | DTO layer explicitly maps columns; token columns are not selectable by the API repository |
 | No secrets or content in notification emails | Operational alert emails carry ids, states and reasons only, never tokens or post content; account-notice emails go only to the connecting admin; the audit event `notification.sent` records the recipient kind, not the address |
 
@@ -173,7 +174,17 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 - Every state transition of `post`, `publication`, `social_account`, `content_source` and every admin action (`workspace.updated`, `membership.*`, `content_source.connected`, `social_account.connected/disconnected`, `publication.retry_requested`) is recorded with actor, timestamp, correlation id and secret-free data.
 - Credential access is audited (`credential.accessed`) without values.
 - Rows are append-only; the application role has `INSERT` and `SELECT` on `audit_log` but no `UPDATE`/`DELETE` grant.
-- Retention: indefinite in MVP; export per workspace on request.
+- Retention: indefinite; rows older than 13 months move to `audit_log_archive` (Phase 7). Admins export a range as NDJSON from the Security page or the public API; every export is audited (`audit.exported`).
+- Phase 7 adds `api_key` actors (public API calls) and events for API keys, webhooks, tenant keys, SSO and exports. Outbound webhooks only ever carry whitelisted events; `credential.accessed`, billing and operator events never leave.
+
+---
+
+## 9a. Public API, webhooks and SSO (Phase 7)
+
+- **API keys**: `pk_live_` + 32 random bytes (base64url); only the SHA-256 hash is stored; scopes `read`/`write`; optional expiry; revocation is immediate; unknown, revoked, expired and unentitled keys all answer 401 identically. Per-key rate limit 60/min with `Retry-After`. `Idempotency-Key` replays are scoped to the workspace and expire after 24 h; a mismatching request is rejected (422) rather than replayed.
+- **Webhooks**: https URLs only (http only for `localhost`); signature `t=<unix>,v1=<HMAC-SHA256(secret, "<t>.<body>")>`; receivers must check a 5-minute tolerance; 10-second timeout; circuit breaker after 10 consecutive failures; payloads are audit rows (secret-free by construction).
+- **SSO**: OIDC authorization code with PKCE (S256) and a nonce; the id token is verified against the issuer's JWKS with issuer, audience, nonce and expiry checks (60 s clock tolerance); the email domain must match the connection; states expire after 10 minutes and are single-use; the resulting session is a normal Better Auth session. The client secret is envelope-encrypted and opened only for the token exchange.
+- **Egress**: `MEDIA_EGRESS_PROXY_URL` sends media downloads through a fixed proxy; the SSRF guard (private ranges, redirects, size and type limits) runs before any request.
 
 ---
 

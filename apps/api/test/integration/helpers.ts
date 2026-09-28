@@ -27,6 +27,7 @@ export const testEnv: Env = {
   AUTH_SECRET: 'test-secret-test-secret-test-secret-0000',
   ENCRYPTION_KEYS: TEST_ENCRYPTION_KEYS,
   PROVIDER_MODE: 'fake',
+  REGION: 'us',
   MAIL_TRANSPORT: 'log',
   MAIL_FROM: 'Postelyo <test@postelyo.local>',
   ALERT_EMAIL: 'ops@example.com',
@@ -59,7 +60,10 @@ export interface TestStack {
   /** Signs in and returns the cookie plus the user's default workspace id. */
   signInWithWorkspace: (email: string) => Promise<{ cookie: string; workspaceId: string }>;
   /** Operator-granted plan (Phase 3): raises the limits of a workspace with no subscription. */
-  grantPlan: (workspaceId: string, plan: 'free' | 'solo' | 'team' | 'agency') => Promise<void>;
+  grantPlan: (
+    workspaceId: string,
+    plan: 'free' | 'solo' | 'team' | 'agency' | 'enterprise',
+  ) => Promise<void>;
 }
 
 export interface TestStackOptions {

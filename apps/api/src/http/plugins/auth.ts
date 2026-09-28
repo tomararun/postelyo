@@ -31,6 +31,7 @@ export function decorateAuth(app: App, auth: Auth): void {
   app.decorate('auth', auth);
   app.decorateRequest('user', null);
   app.decorateRequest('tenant', null);
+  app.decorateRequest('apiKey', null);
 }
 
 /**

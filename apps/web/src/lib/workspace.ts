@@ -8,6 +8,8 @@ export interface WorkspaceDto {
   defaultTimezone: string;
   defaultPublishTime: string;
   plan: string;
+  /** Phase 7 */
+  region: string | null;
   dailyCapPerAccount: number;
   dailyCapIsDefault: boolean;
   notionWebhooks: boolean;

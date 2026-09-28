@@ -6,6 +6,8 @@
 #   ALERT_EMAIL METRICS_TOKEN SENTRY_DSN NOTION_WEBHOOK_SECRET NOTION_CLIENT_ID NOTION_CLIENT_SECRET
 #   STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_PRICE_SOLO STRIPE_PRICE_TEAM STRIPE_PRICE_AGENCY
 #   ANTHROPIC_API_KEY (AI_MODEL optional, defaults to claude-opus-5)
+#   MEDIA_EGRESS_PROXY_URL (optional, Phase 7 fixed-IP media downloads)
+# REGION below labels the installation; deploy/fly.eu.toml is the EU twin with its own secrets.
 # The dashboard (apps/web) is a separate Fly app built from apps/web/Dockerfile with API_INTERNAL_URL
 # pointing at this app's internal address and APP_BASE_URL set to the dashboard's public origin.
 
@@ -29,6 +31,7 @@ kill_timeout = "40s"
   MAIL_TRANSPORT = "smtp"
   PROVIDER_MODE = "live"
   STORAGE_DRIVER = "s3"
+  REGION = "us"
 
 [processes]
   api = "node apps/api/dist/main-api.js"

@@ -91,6 +91,17 @@ When your admin switches on AI assistance (Postelyo → AI) and your plan includ
 
 The AI never schedules or publishes anything. You still set `Status = Scheduled`, and if your workspace requires approvals, they apply as usual. Your admin sees usage, cost and every generation on the AI page.
 
+## Connecting other tools (Developers)
+
+On the Team plan and above, **Developers** gives you an API key for scripts, Zapier or Make, and webhooks that call your URL when something happens (a post is created, a publication goes live or fails, metrics arrive, an approval is granted…). The key and the webhook signing secret are shown once; copy them right away. The full reference with Zapier and Make recipes is in `docs/integrations.md`, and the machine-readable spec is at `/api/v1/openapi.json`.
+
+## Security page (admins)
+
+- **Data residency** shows the region your workspace is hosted in.
+- **Audit export** downloads everything that happened in the workspace as one JSON object per line (Team plan and above).
+- **Single sign-on** (Enterprise): the owner enters your identity provider's issuer URL, client id and secret, and your email domain. From then on, addresses on that domain sign in through your provider, and new colleagues join automatically with the role you chose.
+- **Per-workspace encryption key** (Enterprise): the owner can give the workspace its own key and rotate it; every stored token is re-encrypted under it.
+
 ## Results (analytics)
 
 About an hour after a post goes live its page in Notion fills `Impressions`, `Reach`, `Reactions`, `Comments`, `Shares` and `Clicks` (where the platform reports them), refreshed at 6 hours, 24 hours, 7 days and 30 days. The *Postelyo Analytics* database holds one row per week and platform plus the best times to publish. In Postelyo, **Analytics** shows the weekly trend, top posts, hashtags and best-time suggestions. Owners and admins get a Monday morning email with last week's numbers; switch it off in Settings.

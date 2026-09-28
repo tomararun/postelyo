@@ -1,7 +1,7 @@
 'use server';
 
 import { redirect } from 'next/navigation';
-import { api, errorMessage } from '@/lib/api';
+import { ApiError, api, errorMessage } from '@/lib/api';
 
 /** Server actions shared across pages (Phase 3). Each one calls the api with the visitor's cookie. */
 
@@ -23,6 +23,20 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
   const email = field(formData, 'email', '').trim().toLowerCase();
   const next = field(formData, 'next', '/');
   const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/';
+  // Phase 7: domains with single sign-on go to the identity provider instead of email.
+  let ssoStart: string | null = null;
+  try {
+    const lookup = await api<{ sso: boolean }>(
+      `/api/auth/sso/lookup?email=${encodeURIComponent(email)}`,
+    );
+    if (lookup.sso) {
+      ssoStart = `/api/auth/sso/start?email=${encodeURIComponent(email)}&next=${encodeURIComponent(safeNext)}`;
+    }
+  } catch (err) {
+    // A failed lookup falls back to the magic link.
+    if (!(err instanceof ApiError)) throw err;
+  }
+  if (ssoStart) redirect(ssoStart);
   try {
     await api('/api/auth/sign-in/magic-link', {
       method: 'POST',
@@ -415,5 +429,152 @@ function isRedirect(err: unknown): boolean {
     err !== null &&
     'digest' in err &&
     String(err.digest).startsWith('NEXT_REDIRECT')
+  );
+}
+
+// --- Phase 7: developers and security -------------------------------------------
+
+export interface SecretResult {
+  secret?: string;
+  label?: string;
+  error?: string;
+}
+
+/** Creates an API key; the secret is returned to the client component and shown once. */
+export async function createApiKey(
+  workspaceId: string,
+  _prev: SecretResult,
+  formData: FormData,
+): Promise<SecretResult> {
+  const scopes = ['read', ...(formData.get('write') === 'on' ? ['write'] : [])];
+  const days = field(formData, 'expiresInDays').trim();
+  try {
+    const res = await api<{ key: { prefix: string }; secret: string }>(
+      `/v1/workspaces/${workspaceId}/api-keys`,
+      {
+        method: 'POST',
+        body: {
+          name: field(formData, 'name').trim(),
+          scopes,
+          ...(days ? { expiresInDays: Number(days) } : {}),
+        },
+      },
+    );
+    return { secret: res.secret, label: `API key ${res.key.prefix}…` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function revokeApiKey(workspaceId: string, keyId: string): Promise<void> {
+  const path = `/w/${workspaceId}/developers`;
+  try {
+    await api(`/v1/workspaces/${workspaceId}/api-keys/${keyId}`, { method: 'DELETE' });
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(back(path, { notice: 'API key revoked.' }));
+}
+
+/** Creates a webhook endpoint; the signing secret is returned to the client component and shown once. */
+export async function createWebhook(
+  workspaceId: string,
+  _prev: SecretResult,
+  formData: FormData,
+): Promise<SecretResult> {
+  const events = formData
+    .getAll('events')
+    .map((e) => (typeof e === 'string' ? e : ''))
+    .filter((e) => e.length > 0);
+  try {
+    const res = await api<{ endpoint: { url: string }; secret: string }>(
+      `/v1/workspaces/${workspaceId}/webhooks`,
+      {
+        method: 'POST',
+        body: {
+          url: field(formData, 'url').trim(),
+          description: field(formData, 'description').trim(),
+          events,
+        },
+      },
+    );
+    return { secret: res.secret, label: `Signing secret for ${res.endpoint.url}` };
+  } catch (err) {
+    return { error: errorMessage(err) };
+  }
+}
+
+export async function webhookAction(
+  workspaceId: string,
+  endpointId: string,
+  formData: FormData,
+): Promise<void> {
+  const path = `/w/${workspaceId}/developers`;
+  const op = field(formData, 'op');
+  let notice = 'Webhook updated.';
+  try {
+    if (op === 'delete') {
+      await api(`/v1/workspaces/${workspaceId}/webhooks/${endpointId}`, { method: 'DELETE' });
+      notice = 'Webhook deleted.';
+    } else if (op === 'test') {
+      const d = await api<{
+        status: string;
+        lastStatusCode: number | null;
+        lastError: string | null;
+      }>(`/v1/workspaces/${workspaceId}/webhooks/${endpointId}/test`, {
+        method: 'POST',
+        body: {},
+      });
+      notice = `Test delivery ${d.status}${d.lastStatusCode ? ` (HTTP ${d.lastStatusCode})` : ''}${d.lastError ? `: ${d.lastError}` : ''}.`;
+    } else if (op === 'enable' || op === 'disable') {
+      await api(`/v1/workspaces/${workspaceId}/webhooks/${endpointId}`, {
+        method: 'PATCH',
+        body: { enabled: op === 'enable' },
+      });
+    }
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(back(path, { notice }));
+}
+
+export async function saveSso(workspaceId: string, formData: FormData): Promise<void> {
+  const path = `/w/${workspaceId}/security`;
+  const secret = field(formData, 'clientSecret').trim();
+  const remove = formData.get('op') === 'remove';
+  try {
+    if (remove) {
+      await api(`/v1/workspaces/${workspaceId}/sso`, { method: 'DELETE' });
+    } else {
+      await api(`/v1/workspaces/${workspaceId}/sso`, {
+        method: 'PUT',
+        body: {
+          issuer: field(formData, 'issuer').trim(),
+          clientId: field(formData, 'clientId').trim(),
+          ...(secret ? { clientSecret: secret } : {}),
+          emailDomain: field(formData, 'emailDomain').trim(),
+          defaultRole: field(formData, 'defaultRole', 'viewer'),
+          enabled: formData.get('enabled') === 'on',
+        },
+      });
+    }
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(back(path, { notice: remove ? 'Single sign-on removed.' : 'Single sign-on saved.' }));
+}
+
+export async function tenantKeyAction(workspaceId: string, formData: FormData): Promise<void> {
+  const path = `/w/${workspaceId}/security`;
+  const op = field(formData, 'op') === 'rotate' ? 'rotate' : 'enable';
+  try {
+    await api(`/v1/workspaces/${workspaceId}/tenant-keys/${op}`, { method: 'POST', body: {} });
+  } catch (err) {
+    redirect(back(path, { error: errorMessage(err) }));
+  }
+  redirect(
+    back(path, {
+      notice: op === 'rotate' ? 'Workspace key rotated.' : 'Per-workspace encryption enabled.',
+    }),
   );
 }

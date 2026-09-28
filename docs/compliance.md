@@ -24,6 +24,12 @@ Status: living document, started with Phase 3 (2026-09-26). Audience: whoever si
 | Billing identity | `billing_customer`, `subscription` | Link the Stripe customer and current plan | Until purge (Stripe keeps its own records) |
 | Stripe events | `stripe_event` | Webhook idempotency | Ids and types only, no payload |
 | Invitations | `invitation` | Team onboarding | Token hash only; expires after 7 days |
+| API keys (Phase 7) | `api_key` | Public API access | SHA-256 hash, name, prefix, scopes; secret never stored; until revoked/purge |
+| Idempotency replays (Phase 7) | `idempotency_key` | Replay API responses safely | Stored response bodies (post/publication DTOs); 24 hours |
+| Webhook endpoints and deliveries (Phase 7) | `webhook_endpoint`, `webhook_delivery` | Notify customer systems | Endpoint URL, envelope-encrypted signing secret, delivered payloads (audit data, secret-free); until deleted/purge |
+| Per-workspace keys (Phase 7) | `workspace_key` | Enterprise encryption | Wrapped key material only; until purge |
+| SSO connection and states (Phase 7) | `sso_connection`, `sso_state` | Enterprise sign-in | Issuer, client id, envelope-encrypted client secret, email domain; states 10 minutes |
+| Audit archive (Phase 7) | `audit_log_archive` | Long-term accountability | Same as audit trail, rows older than 13 months; `workspace_id` nulled at purge |
 
 Not stored: passwords (magic links only), card data (Stripe Checkout and Customer Portal handle it), Notion content outside the connected database, social platform content other than what Postelyo itself published.
 
@@ -44,6 +50,8 @@ Not stored: passwords (magic links only), card data (Stripe Checkout and Custome
 | Anthropic (when AI assistance is on) | Text generation and image descriptions | Page text, workspace voice document, images attached to posts; no account credentials. 30-day retention on Anthropic's side per their API terms. |
 | Email provider behind `SMTP_URL` | Magic links, invitations, notices | Recipient email, workspace and account names |
 | Sentry (when `SENTRY_DSN` is set) | Error tracking | Redacted errors; tokens are never logged |
+| Customer webhook receivers and identity providers (Phase 7, customer-chosen) | Outbound webhooks; SSO | Audit event payloads the customer subscribed to; OIDC identity of the signing-in user |
+| Egress proxy provider (when `MEDIA_EGRESS_PROXY_URL` is set) | Fixed-IP media downloads | Public image URLs the customer attached |
 | Notion, LinkedIn, X, Meta | The platforms the customer connects | Content published on their instruction |
 
 ## 4. Platform policy checklist
@@ -101,3 +109,11 @@ Review before public launch and after every provider policy update. Each row nam
 - [ ] Workspace deletion tested end to end in staging (request, purge job, audit anonymised).
 - [ ] Security checklist in [security.md](./security.md) §12 completed for the release.
 - [ ] Support address for privacy requests published and monitored.
+- [ ] Phase 7: SOC 2 gaps in [soc2-controls.md](./soc2-controls.md) reviewed; restore drill run and logged in the runbook; regional deployment secrets separated.
+
+## 7. Marketplace listing checklist (Phase 7)
+
+- **Notion template gallery**: submit the template suite (Content, Campaigns, Ideas, Analytics) with screenshots and the setup guide link; keep the listing's template id in sync with `notion:template`.
+- **Zapier / Make**: build the apps from [integrations.md](./integrations.md); partner review needs a test account with API access (Team plan), the OpenAPI link, a privacy policy URL and a support address.
+- **LinkedIn Marketing Developer / Meta Business partner programs**: apply once the pilot shows sustained volume; both require the app reviews already listed above plus a company verification.
+- **Security questionnaires**: answer from [soc2-controls.md](./soc2-controls.md) and [security.md](./security.md); keep a dated copy of each answered questionnaire.

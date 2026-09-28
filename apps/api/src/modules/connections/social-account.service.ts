@@ -279,7 +279,7 @@ export class SocialAccountService {
       .limit(1);
 
     const id = existing?.id ?? uuidv7();
-    const sealed = this.sealTokens(id, input.tokens);
+    const sealed = await this.sealTokens(ctx.workspaceId, id, input.tokens);
     const values = {
       accountType: input.accountType,
       ...sealed,
@@ -339,14 +339,22 @@ export class SocialAccountService {
     return row;
   }
 
-  private sealTokens(id: string, tokens: AccountTokens) {
+  private async sealTokens(workspaceId: string, id: string, tokens: AccountTokens) {
     const ref = { entityType: 'social_account' as const, entityId: id };
     return {
-      accessTokenEnc: this.vault.seal({ ...ref, column: 'access_token' }, tokens.accessToken),
+      accessTokenEnc: await this.vault.sealFor(
+        workspaceId,
+        { ...ref, column: 'access_token' },
+        tokens.accessToken,
+      ),
       refreshTokenEnc: tokens.refreshToken
-        ? this.vault.seal({ ...ref, column: 'refresh_token' }, tokens.refreshToken)
+        ? await this.vault.sealFor(
+            workspaceId,
+            { ...ref, column: 'refresh_token' },
+            tokens.refreshToken,
+          )
         : null,
-      credentialKeyId: this.vault.currentKeyId,
+      credentialKeyId: await this.vault.keyIdFor(workspaceId),
       tokenExpiresAt: tokens.expiresAt,
       refreshTokenExpiresAt: tokens.refreshTokenExpiresAt ?? null,
       scopes: tokens.scopes,
@@ -486,7 +494,7 @@ export class SocialAccountService {
       refreshToken: tokens.refreshToken ?? undefined,
     };
     return withTenantScope(this.db, ctx.workspaceId, async (tx) => {
-      const sealed = this.sealTokens(account.id, merged);
+      const sealed = await this.sealTokens(ctx.workspaceId, account.id, merged);
       const [updated] = await tx
         .update(socialAccount)
         .set({

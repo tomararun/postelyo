@@ -11,7 +11,7 @@ Related: [architecture.md](./architecture.md) §10, §18, §19 · [security.md](
 | Component | Where | What it does |
 |-----------|-------|--------------|
 | `api` process | Fly process group `api` | Admin UI, `/v1` endpoints, OAuth callback, `/webhooks/notion`, `/metrics`, worker-heartbeat alert |
-| `worker` process | Fly process group `worker` | Notion sync (1 min) and webhook page syncs, scheduler tick (30 s, incl. daily caps), publish and writeback jobs, maintenance (5 min: reconciliation, alerts, token notices, digest, pruning) |
+| `worker` process | Fly process group `worker` | Notion sync (1 min) and webhook page syncs, scheduler tick (30 s, incl. daily caps), publish and writeback jobs, metrics fetches, outbound webhook dispatch (1 min), maintenance (5 min: reconciliation, alerts, token notices, digest, pruning, audit archive, queue check) |
 | Postgres | Managed | Everything: domain tables, pg-boss queues, audit log |
 | Notion | External | Content source; polled, written back to |
 | LinkedIn | External | Publishing target |
@@ -57,6 +57,12 @@ The publication is in its final state but Notion could not be updated after six 
 
 ### `content_source.sync_failed` (window 1 h)
 Notion rejected the sync. `status = error` means the token is invalid (401): the workspace admin must paste a new token on the Connections page. Other errors (rate limit, 5xx) clear themselves; if they persist for an hour, check Notion's status page.
+
+### `webhook.endpoint_disabled` (window 24 h)
+A customer's webhook endpoint failed ten deliveries in a row and was switched off. Nothing else is affected. The workspace's admins see the reason on Developers and can re-enable it; if the customer asks, share the last error from `webhook_delivery.last_error`. Consider a courtesy email when the endpoint belongs to a paying integration.
+
+### `queue.saturated` (window 1 h)
+A pg-boss queue has more than 5 000 waiting jobs or its oldest waiting job is older than 10 minutes. Check `/metrics` (`postelyo_queue_jobs`, `postelyo_queue_oldest_waiting_seconds`) and the worker logs. Usual causes: a provider outage causing retries to pile up (wait, it drains), a stuck worker (restart it), or genuine growth. For growth: add worker machines (`flyctl scale count worker=N`); every job type scales horizontally without code changes. If the alert repeats on several days a week with workers scaled, the queue migration in architecture §20 is due.
 
 ### Daily digest (once per ~20 h)
 Per-workspace counts of published, failed, needs-review, accounts needing re-auth, sources in error. Informational; act on non-zero failed/needs-review counts using the posts page filters.
@@ -120,6 +126,16 @@ Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by
 3. Until Notion approves the integration only workspaces you own can install it; the token path covers everyone else meanwhile.
 4. A source that shows *Notion is connected but not set up yet* is a pending OAuth source (`content_source.status = disabled`, `config.setupPending = true`); the user finishes it at `/w/:ws/setup?source=...`. Disconnecting it discards the token.
 
+### Phase 7 public API, webhooks, SSO, tenant keys
+1. Nothing to configure server-side for the API and webhooks; the worker's `webhook-dispatch` job runs every minute. Plans: Team and Agency get the API, webhooks and audit export; Enterprise (operator-granted: `update workspace set plan = 'enterprise' where id = '…'`) adds SSO and per-workspace keys.
+2. Customers create keys and endpoints on Developers and configure SSO and tenant keys on Security (owners). Secrets are shown once; there is nothing to look up for them later.
+3. Diagnose API use: `select name, prefix, scopes, last_used_at, revoked_at from api_key where workspace_id = '…'`; audit rows with `actor_type = 'api_key'` show what a key did.
+4. Diagnose webhooks: `select event, status, attempts, last_status_code, last_error, next_attempt_at from webhook_delivery where endpoint_id = '…' order by created_at desc limit 20`. `dead` = attempt budget spent; the endpoint's `disabled_reason` says why it was switched off.
+5. SSO problems: the sign-in page shows the reason (discovery unreachable, code rejected, id token could not be verified, wrong domain, nonce mismatch). Check the issuer's discovery URL and that the redirect URI shown on Security is registered at the IdP. `sso_state` rows expire after 10 minutes.
+6. Tenant keys: `select version, master_key_id, rotated_at from workspace_key where workspace_id = '…'`; `social_account.credential_key_id` and the envelope key id of every blob should read `t<version>`. If the master key is rotated (`ENCRYPTION_KEYS`), tenant keys keep working: they are wrapped by the master key id recorded in `master_key_id`, so keep that key in the list until every workspace has rotated once.
+7. Egress proxy: set `MEDIA_EGRESS_PROXY_URL` (e.g. a fixed-IP HTTPS proxy) and tell customers the address to allow-list; unset means direct fetches.
+8. Regions: deploy `deploy/fly.eu.toml` as a second app with its own database, bucket and secrets; set `REGION` accordingly (shown on Security and the workspace DTO).
+
 ### Phase 6 AI assistance
 1. Set `ANTHROPIC_API_KEY` (and optionally `AI_MODEL`, default `claude-opus-5`); `AI_PROVIDER=fake` runs everything without a provider. Redeploy. The AI page shows the provider and model.
 2. Per workspace: Dashboard → AI → *Enable AI assistance*, voice, banned phrases, optional cap. The plan must include AI tokens (`aiTokensPerMonth` in `plans.ts`; comp with `workspace.plan` as for other limits).
@@ -160,11 +176,29 @@ The app must connect as a role that is **not** a superuser and does not have `BY
 ### Rotate `AUTH_SECRET`
 Changing it invalidates outstanding magic links and cookie signatures; sessions stored in the database survive. Do it during low usage.
 
-### Backup and restore drill (quarterly)
-Restore the latest Fly Postgres snapshot into a scratch database, point a local api at it (`DATABASE_URL`), sign in, and open a workspace's posts page. Record the date in this file.
+### Restore drill (monthly, Phase 7)
+`DATABASE_URL=<source> DRILL_TARGET_DATABASE_URL=<empty drill db> npm run restore:drill --workspace apps/api` dumps the source with `pg_dump`, restores into the drill database, compares row counts of the tables that matter and prints a JSON report (dump/restore durations included). The script refuses a non-empty target. Then point a local api at the drill database, sign in and open a workspace's posts page. Record the date, durations and result below.
+
+Drill log:
+
+| Date | Source | Dump ms | Restore ms | Result |
+|------|--------|---------|------------|--------|
+| (none yet) | | | | |
+
+### Regional failover plan (Phase 7)
+Each region (`REGION=us` on `deploy/fly.toml`, `REGION=eu` on `deploy/fly.eu.toml`) is a separate installation: its own Postgres, bucket, secrets and dashboard app. There is no cross-region replication (data residency). Failover therefore means restoring the same region from backup:
+1. Declare the incident; pause the worker (`flyctl scale count worker=0 --app <app>`) so no publication runs against a half-restored database.
+2. Restore the latest snapshot into a new Postgres in the same region (managed provider restore, or the drill procedure above against a fresh database).
+3. Point the api and worker at it (`flyctl secrets set DATABASE_URL=…`), run migrations (release command does this), verify `/health/ready`, then scale the worker back up.
+4. Reconciliation handles publications that were in flight: anything `publishing` with an expired lease becomes `ambiguous` and is checked against the provider before anyone is paged.
+5. Communicate the recovery point (snapshot time) to affected workspaces; audit rows between the snapshot and the incident are lost, publications are not (the provider is the source of truth, see §2 `publication.ambiguous`).
+Moving a workspace between regions is an export/import by operators (not self-serve): disconnect sources and accounts, delete the workspace in the old region, re-create in the new one.
+
+### Audit archive
+Maintenance moves audit rows older than 13 months to `audit_log_archive` (5 000 per run). Exports read both tables. To look at old rows: `select * from audit_log_archive where workspace_id = '…' order by occurred_at desc limit 50`. Native partitioning is the next step once the archive itself is large (architecture §20).
 
 ### Prune history
-Audit rows are kept indefinitely. `publish_attempt.response_meta` and `pgboss` completed jobs are pruned automatically (24 h for jobs). Nothing else needs manual cleanup at pilot volume.
+Audit rows are kept 13 months in the hot table and then archived (above). Idempotency records expire after 24 h and webhook deliveries are kept with their endpoint. `publish_attempt.response_meta` and `pgboss` completed jobs are pruned automatically (24 h for jobs). Nothing else needs manual cleanup at pilot volume.
 
 ---
 
@@ -221,3 +255,6 @@ Never `select access_token_enc` for any reason other than confirming it is null 
 | `ANTHROPIC_API_KEY` | api | Phase 6 AI assistance; unset = AI off everywhere |
 | `AI_MODEL` | api | Default model id (default `claude-opus-5`); workspaces may override |
 | `AI_PROVIDER` | api | `anthropic` (default with a key) or `fake` |
+| `REGION` | both | Phase 7 deployment region label (`us` default, `eu` on `fly.eu.toml`); shown to workspaces |
+| `MEDIA_EGRESS_PROXY_URL` | worker (api for previews) | Optional HTTP(S) proxy for media downloads (fixed egress IP) |
+| `DRILL_TARGET_DATABASE_URL` | tooling | Empty database the restore drill restores into |

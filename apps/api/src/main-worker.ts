@@ -14,6 +14,7 @@ import { startSchedulerLoop } from './jobs/scheduler.job.js';
 import { registerWorkspaceDeleteJob } from './jobs/workspace-delete.job.js';
 import { registerMetricsJob } from './jobs/metrics.job.js';
 import { registerWritebackJob } from './jobs/writeback.job.js';
+import { registerWebhookJob } from './jobs/webhook.job.js';
 import { buildServices } from './services.js';
 import { installShutdown } from './shared/shutdown.js';
 
@@ -68,9 +69,13 @@ async function main(): Promise<void> {
       postMetrics: services.postMetrics,
       analyticsWriteback: services.analyticsWriteback,
       weeklyReport: services.weeklyReport,
+      apiKeys: services.apiKeys,
+      auditArchive: services.auditArchive,
+      queueHealth: services.queueHealth,
     },
     logger,
   );
+  await registerWebhookJob(boss, services.webhooks, logger);
   await registerWorkspaceDeleteJob(boss, services.deletion, logger);
   await registerMetricsJob(boss, services.postMetrics, logger);
   const schedulerLoop = startSchedulerLoop(services.scheduler, logger);

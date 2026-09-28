@@ -65,7 +65,20 @@ export type AuditEvent =
   | 'analytics.rollup_written'
   | 'report.weekly_sent'
   | 'ai.generated'
-  | 'ai.assisted';
+  | 'ai.assisted'
+  | 'api_key.created'
+  | 'api_key.revoked'
+  | 'webhook.endpoint_created'
+  | 'webhook.endpoint_updated'
+  | 'webhook.endpoint_deleted'
+  | 'webhook.endpoint_disabled'
+  | 'workspace_key.enabled'
+  | 'workspace_key.rotated'
+  | 'sso.connection_updated'
+  | 'sso.signed_in'
+  | 'audit.exported'
+  | 'audit.archived'
+  | 'queue.saturated';
 
 export type AuditEntityType =
   | 'workspace'
@@ -81,7 +94,10 @@ export type AuditEntityType =
   | 'worker'
   | 'campaign'
   | 'approval'
-  | 'ai_generation';
+  | 'ai_generation'
+  | 'api_key'
+  | 'webhook_endpoint'
+  | 'sso_connection';
 
 export interface AuditEntry {
   workspaceId: string | null;
