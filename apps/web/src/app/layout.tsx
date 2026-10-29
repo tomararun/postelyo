@@ -9,8 +9,13 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen antialiased">{children}</body>
+    // Browser extensions (scroll lockers, translators, password managers) add attributes such as
+    // style="overflow…" to <html>/<body> before React hydrates. suppressHydrationWarning ignores
+    // attribute differences on these two elements only; mismatches inside the page still report.
+    <html lang="en" suppressHydrationWarning>
+      <body className="min-h-screen antialiased" suppressHydrationWarning>
+        {children}
+      </body>
     </html>
   );
 }
