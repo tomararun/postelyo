@@ -1,25 +1,106 @@
 @import 'tailwindcss';
 
+/*
+ * Postelyo dashboard design tokens. Light theme only: the analytics chart palette
+ * (#2a78d6 / #eb6834 / #1baf7a / #eda100) was validated against the white card surface.
+ */
 :root {
-  --background: #fafafa;
-  --foreground: #171717;
-  --muted: #6b7280;
-  --border: #e5e7eb;
-  --primary: #111827;
-  --primary-foreground: #ffffff;
+  --background: #f5f6fa;
+  --foreground: #0f172a;
+  --muted: #64748b;
+  --subtle: #94a3b8;
+  --border: #e4e7ef;
+  --border-strong: #cbd2e0;
+  --surface-muted: #f8f9fc;
   --card: #ffffff;
-  --danger: #b91c1c;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-soft: #eef0ff;
+  --primary-foreground: #ffffff;
+  --danger: #dc2626;
   --success: #15803d;
+  --warning: #b45309;
+  --ring: rgb(79 70 229 / 0.35);
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
+  --shadow-raised: 0 10px 30px -12px rgb(15 23 42 / 0.18);
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family:
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    sans-serif;
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+::selection {
+  background: var(--primary-soft);
+}
+
+/* Links written inline in page copy ("openapi.json", "View on LinkedIn") read as links. */
+main a.underline {
+  color: var(--primary);
+  text-decoration-color: rgb(79 70 229 / 0.35);
+  text-underline-offset: 3px;
+}
+main a.underline:hover {
+  text-decoration-color: var(--primary);
+}
+main a.font-medium:hover {
+  color: var(--primary);
+}
+
+/* Filter strips (Posts states, Analytics ranges): the active entry becomes a pill. */
+main nav a {
+  border-radius: 9999px;
+  padding: 0.25rem 0.625rem;
+  text-decoration: none;
+  transition:
+    background-color 120ms,
+    color 120ms;
+}
+main nav a:hover {
+  background: var(--surface-muted);
+  color: var(--foreground);
+}
+main nav a.underline {
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-weight: 600;
+}
+
+/* Key-figure rows (<dl class="grid ...">) render as stat tiles. */
+main dl.grid > div {
+  border: 1px solid var(--border);
+  background: var(--surface-muted);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+}
+main dl.grid dt {
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+main dl.grid dd {
+  margin-top: 0.25rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+code {
+  font-size: 0.85em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }

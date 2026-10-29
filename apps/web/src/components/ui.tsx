@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { Icon } from '@/components/icons';
 
 /** Small shadcn-style primitives, hand-written to keep the dependency surface minimal. */
 
@@ -19,12 +20,15 @@ export function Button({
   href?: string;
 }) {
   const base =
-    'inline-flex items-center justify-center rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50';
+    'inline-flex items-center justify-center gap-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50';
   const styles = {
-    primary: 'bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90',
-    secondary: 'border border-[var(--border)] bg-white hover:bg-gray-50',
-    danger: 'border border-red-200 bg-white text-[var(--danger)] hover:bg-red-50',
-    link: 'text-[var(--primary)] underline-offset-4 hover:underline px-0',
+    primary:
+      'h-9 px-3.5 bg-[var(--primary)] text-[var(--primary-foreground)] shadow-sm shadow-indigo-600/20 hover:bg-[var(--primary-hover)] active:translate-y-px',
+    secondary:
+      'h-9 px-3.5 border border-[var(--border)] bg-white text-slate-700 shadow-sm hover:border-[var(--border-strong)] hover:bg-slate-50 active:translate-y-px',
+    danger:
+      'h-9 px-3.5 border border-red-200 bg-white text-[var(--danger)] shadow-sm hover:border-red-300 hover:bg-red-50 active:translate-y-px',
+    link: 'px-0 text-[var(--primary)] underline-offset-4 hover:underline',
   }[variant];
   if (href) {
     return (
@@ -42,22 +46,29 @@ export function Button({
 
 export function Card({
   title,
+  description,
   children,
   actions,
 }: {
   title?: string;
+  description?: string;
   children: ReactNode;
   actions?: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-5 shadow-sm">
+    <section className="rounded-2xl border border-[var(--border)] bg-[var(--card)] shadow-[var(--shadow-card)]">
       {(title || actions) && (
-        <div className="mb-4 flex items-center justify-between gap-4">
-          {title && <h2 className="text-base font-semibold">{title}</h2>}
+        <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4 sm:px-6">
+          <div>
+            {title && (
+              <h2 className="text-[15px] font-semibold tracking-tight text-slate-900">{title}</h2>
+            )}
+            {description && <p className="mt-0.5 text-sm text-[var(--muted)]">{description}</p>}
+          </div>
           {actions}
         </div>
       )}
-      {children}
+      <div className="space-y-4 p-5 sm:p-6">{children}</div>
     </section>
   );
 }
@@ -70,17 +81,29 @@ export function Badge({
   tone?: 'neutral' | 'success' | 'warning' | 'danger';
 }) {
   const tones = {
-    neutral: 'bg-gray-100 text-gray-800',
-    success: 'bg-green-100 text-green-800',
-    warning: 'bg-amber-100 text-amber-800',
-    danger: 'bg-red-100 text-red-800',
+    neutral: 'bg-slate-100 text-slate-700 ring-slate-200',
+    success: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    warning: 'bg-amber-50 text-amber-800 ring-amber-200',
+    danger: 'bg-red-50 text-red-700 ring-red-200',
+  }[tone];
+  const dot = {
+    neutral: 'bg-slate-400',
+    success: 'bg-emerald-500',
+    warning: 'bg-amber-500',
+    danger: 'bg-red-500',
   }[tone];
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tones}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset ${tones}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${dot}`} aria-hidden="true" />
       {children}
     </span>
   );
 }
+
+const fieldClass =
+  'w-full rounded-lg border border-[var(--border)] bg-white px-3 py-2 text-sm text-slate-900 shadow-sm transition-colors placeholder:text-slate-400 hover:border-[var(--border-strong)] focus:border-[var(--primary)] focus:ring-4 focus:ring-[var(--ring)] focus:outline-none';
 
 export function Input({
   name,
@@ -99,14 +122,14 @@ export function Input({
 }) {
   return (
     <label className="block text-sm">
-      <span className="mb-1 block font-medium">{label}</span>
+      <span className="mb-1.5 block font-medium text-slate-700">{label}</span>
       <input
         name={name}
         type={type}
         defaultValue={defaultValue ?? undefined}
         placeholder={placeholder}
         required={required}
-        className="w-full rounded-md border border-[var(--border)] bg-white px-3 py-1.5 text-sm outline-none focus:border-gray-400"
+        className={fieldClass}
       />
     </label>
   );
@@ -127,7 +150,7 @@ export function Select({
     <select
       name={name}
       defaultValue={defaultValue}
-      className="rounded-md border border-[var(--border)] bg-white px-2 py-1.5 text-sm"
+      className={`${fieldClass} w-auto min-w-[8rem] pr-8`}
     >
       {options.map((o) => (
         <option key={o.value} value={o.value}>
@@ -138,7 +161,7 @@ export function Select({
   );
   return label ? (
     <label className="block text-sm">
-      <span className="mb-1 block font-medium">{label}</span>
+      <span className="mb-1.5 block font-medium text-slate-700">{label}</span>
       {select}
     </label>
   ) : (
@@ -148,12 +171,15 @@ export function Select({
 
 export function Table({ head, children }: { head: string[]; children: ReactNode }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+    <div className="-mx-5 overflow-x-auto sm:-mx-6">
+      <table className="w-full text-sm [&_td]:px-5 [&_td]:py-3 [&_td]:align-middle sm:[&_td]:px-6 [&_tbody_tr]:transition-colors [&_tbody_tr:hover]:bg-slate-50/70">
         <thead>
-          <tr className="border-b border-[var(--border)] text-left text-xs uppercase text-[var(--muted)]">
-            {head.map((h) => (
-              <th key={h} className="py-2 pr-4 font-medium">
+          <tr className="border-y border-[var(--border)] bg-[var(--surface-muted)] text-left">
+            {head.map((h, i) => (
+              <th
+                key={`${h}-${i}`}
+                className="px-5 py-2.5 text-[11px] font-semibold tracking-wider whitespace-nowrap text-slate-500 uppercase sm:px-6"
+              >
                 {h}
               </th>
             ))}
@@ -173,11 +199,19 @@ export function Notice({
   children: ReactNode;
 }) {
   const tones = {
-    info: 'border-blue-200 bg-blue-50 text-blue-900',
-    error: 'border-red-200 bg-red-50 text-red-900',
-    success: 'border-green-200 bg-green-50 text-green-900',
+    info: 'border-indigo-100 bg-indigo-50/70 text-indigo-950 [&_svg]:text-indigo-500',
+    error: 'border-red-200 bg-red-50 text-red-900 [&_svg]:text-red-500',
+    success: 'border-emerald-200 bg-emerald-50 text-emerald-900 [&_svg]:text-emerald-500',
   }[kind];
-  return <p className={`rounded-md border px-3 py-2 text-sm ${tones}`}>{children}</p>;
+  const icon = kind === 'error' ? 'alert' : kind === 'success' ? 'check' : 'info';
+  return (
+    <div className={`flex gap-2.5 rounded-xl border px-3.5 py-3 text-sm leading-6 ${tones}`}>
+      <span className="mt-[3px] shrink-0">
+        <Icon name={icon} />
+      </span>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
 }
 
 /** Reads `?notice=` / `?error=` query params the way the server-rendered pages do. */

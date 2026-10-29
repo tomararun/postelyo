@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Logo } from '@/components/icons';
 import { Notice } from '@/components/ui';
 
 /** Placeholder wording (Phase 3); mirrors apps/api routes/legal.ts. Replace after legal review. */
@@ -18,14 +19,15 @@ export const TERMS = [
 
 export function LegalPage({ title, paragraphs }: { title: string; paragraphs: string[] }) {
   return (
-    <div className="mx-auto max-w-2xl space-y-4 px-4 py-10">
-      <Link href="/" className="text-lg font-semibold">
-        Postelyo
+    <div className="mx-auto max-w-2xl space-y-5 px-6 py-12">
+      <Link href="/" className="flex items-center gap-2.5">
+        <Logo />
+        <span className="text-lg font-semibold tracking-tight">Postelyo</span>
       </Link>
-      <h1 className="text-2xl font-semibold">{title}</h1>
+      <h1 className="pt-6 text-3xl font-semibold tracking-tight text-slate-900">{title}</h1>
       <Notice kind="info">Placeholder text pending legal review.</Notice>
       {paragraphs.map((p) => (
-        <p key={p} className="text-sm leading-6">
+        <p key={p} className="text-[15px] leading-7 text-slate-700">
           {p}
         </p>
       ))}
