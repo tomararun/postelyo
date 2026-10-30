@@ -147,6 +147,23 @@ describe('phase 7 public API, webhooks, enterprise security', () => {
     expect(planHas('enterprise', 'tenantKeys')).toBe(true);
   });
 
+  it('serves the public plan catalog without authentication', async () => {
+    const res = await stack.app.inject({ method: 'GET', url: '/v1/plans' });
+    expect(res.statusCode).toBe(200);
+    const { plans } = res.json<{
+      plans: {
+        id: string;
+        priceUsd: number;
+        custom: boolean;
+        limits: { members: number | null };
+      }[];
+    }>();
+    expect(plans.map((p) => p.id)).toEqual(['free', 'solo', 'team', 'agency', 'enterprise']);
+    expect(plans.find((p) => p.id === 'agency')!.limits.members).toBeNull();
+    expect(plans.find((p) => p.id === 'enterprise')!.custom).toBe(true);
+    expect(res.headers['cache-control']).toContain('public');
+  });
+
   it('shows the deployment region on the workspace', async () => {
     const ws = await inject('GET', `/v1/workspaces/${workspaceId}`);
     expect(ws.json<{ region: string }>().region).toBe('eu');

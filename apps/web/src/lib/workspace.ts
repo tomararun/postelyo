@@ -38,12 +38,12 @@ export async function loadWorkspace(workspaceId: string, path: string) {
   const me = await getMe();
   if (!me) redirect(`/sign-in?next=${encodeURIComponent(path)}`);
   const membership = me.workspaces.find((w) => w.id === workspaceId);
-  if (!membership) redirect('/?error=' + encodeURIComponent('Workspace not found.'));
+  if (!membership) redirect('/workspaces?error=' + encodeURIComponent('Workspace not found.'));
   let workspace: WorkspaceDto;
   try {
     workspace = await api<WorkspaceDto>(`/v1/workspaces/${workspaceId}`);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 404) redirect('/');
+    if (err instanceof ApiError && err.status === 404) redirect('/workspaces');
     throw err;
   }
   return {

@@ -5,9 +5,34 @@ import './globals.css';
 
 const inter = Inter({ subsets: ['latin'], display: 'swap', variable: '--font-inter' });
 
+const siteUrl = process.env['APP_BASE_URL'] ?? 'http://localhost:3001';
+const description =
+  'Plan in Notion, publish everywhere. Postelyo schedules LinkedIn, X, Facebook and Instagram posts from your Notion database and writes the results back.';
+
 export const metadata: Metadata = {
-  title: 'Postelyo',
-  description: 'Plan in Notion, publish everywhere.',
+  metadataBase: new URL(siteUrl),
+  title: { default: 'Postelyo', template: '%s · Postelyo' },
+  description,
+  applicationName: 'Postelyo',
+  keywords: [
+    'Notion social media scheduler',
+    'Notion to LinkedIn',
+    'schedule posts from Notion',
+    'social media calendar',
+    'content calendar',
+  ],
+  openGraph: {
+    type: 'website',
+    siteName: 'Postelyo',
+    title: 'Postelyo · Plan in Notion, publish everywhere',
+    description,
+    url: '/',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Postelyo · Plan in Notion, publish everywhere',
+    description,
+  },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

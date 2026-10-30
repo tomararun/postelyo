@@ -10,8 +10,8 @@ There are two ways to connect Notion. **Connect with Notion** (one click, recomm
 
 ## 1. Sign in and set your workspace time zone
 
-1. Open the Postelyo link you were given and enter your email. Click the sign-in link in the email (valid 15 minutes).
-2. A workspace is created for you. Open **Connections**.
+1. Open the Postelyo website and click **Get started free** (or go to `/sign-up`). Enter your work email and click the link in the email (valid 15 minutes). Already have an account? Use **Sign in** instead.
+2. A workspace is created for you and the **Welcome** checklist opens: connect Notion, connect a social account, schedule your first post. You can skip to the dashboard at any time; the list of your workspaces is at `/workspaces`.
 3. Ask your Postelyo contact to set the workspace **time zone** and **default publish time** if they are not right for you (for example `Europe/Berlin`, `09:00`). Dates in Notion without a time publish at the default time in that zone.
 
 ## 2a. Connect with Notion (recommended)

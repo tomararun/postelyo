@@ -35,7 +35,7 @@ function navFor(id: string): NavGroup[] {
 }
 
 const HOME: NavGroup[] = [
-  { label: 'Account', items: [{ label: 'Workspaces', href: '/', icon: 'home' }] },
+  { label: 'Account', items: [{ label: 'Workspaces', href: '/workspaces', icon: 'home' }] },
 ];
 
 function Avatar({ email }: { email: string }) {
@@ -62,14 +62,17 @@ export function Shell({
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r border-[var(--border)] bg-white lg:flex">
         <div className="flex h-16 items-center gap-2.5 px-5">
           <Logo />
-          <Link href="/" className="text-[17px] font-semibold tracking-tight text-slate-900">
+          <Link
+            href="/workspaces"
+            className="text-[17px] font-semibold tracking-tight text-slate-900"
+          >
             Postelyo
           </Link>
         </div>
         {workspace && (
           <div className="px-3 pb-2">
             <Link
-              href="/"
+              href="/workspaces"
               className="flex items-center justify-between gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-muted)] px-3 py-2.5 transition-colors hover:border-[var(--border-strong)]"
               title="Switch workspace"
             >
@@ -128,7 +131,7 @@ export function Shell({
       <div className="min-w-0 flex-1">
         <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-white/85 backdrop-blur lg:hidden">
           <div className="flex h-14 items-center justify-between gap-3 px-4">
-            <Link href="/" className="flex items-center gap-2">
+            <Link href="/workspaces" className="flex items-center gap-2">
               <Logo size={28} />
               <span className="font-semibold tracking-tight">Postelyo</span>
             </Link>

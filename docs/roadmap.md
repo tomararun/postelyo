@@ -150,6 +150,22 @@ Deferred: Zapier/Make marketplace listings, SAML, KMS-backed master keys and BYO
 
 ---
 
+## Public site and sign-up (built 2026-10-30)
+
+Goal: anyone with the URL can see what Postelyo does, compare plans and sign up, then land in a guided setup.
+
+| Item | Notes | Hook | Status |
+|------|-------|------|--------|
+| Marketing homepage | Hero, how it works, features, plans, FAQ, call to action; session-aware header | `/` | Done |
+| Pricing page | Plan cards and comparison table from the live plan catalog | `/pricing`, `GET /v1/plans` | Done |
+| Sign-up and onboarding | Separate sign-up page; first-run checklist (Notion, account, first post) | `/sign-up`, `/welcome` | Done |
+| Workspace list moved | Dashboard home is now `/workspaces` with a finish-setup banner | `/workspaces` | Done |
+| Discoverability | Titles, Open Graph and Twitter cards, share image, sitemap, robots | `layout.tsx`, `sitemap.ts`, `robots.ts` | Done |
+
+Still open: final prices (D62), a real sales contact address for Enterprise, blog or changelog pages if wanted.
+
+---
+
 ## Later – Intelligence and growth
 
 | Item | Notes | Hook |

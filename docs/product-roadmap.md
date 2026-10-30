@@ -323,6 +323,12 @@ Each item behind a plan entitlement; nothing changes behaviour for existing plan
 
 ---
 
+## Public site and sign-up (built 2026-10-30)
+
+**Status.** Built: a public homepage at `/`, a pricing page, a dedicated sign-up page and a first-run onboarding checklist, with search and share metadata. Visitors no longer meet a bare sign-in form. Plans shown publicly come from the same definitions billing enforces. Details in architecture §7.8 and decisions D60 to D62.
+
+---
+
 ## Decision points
 
 1. **After Phase 1 (pilot).** Did the team want more platforms, or a better UI? Platforms → Phase 2 as planned. UI → bring the control-plane dashboard forward from Phase 3, still not an editor.

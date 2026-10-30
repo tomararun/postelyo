@@ -21,8 +21,12 @@ export async function signOut(): Promise<void> {
 
 export async function requestMagicLink(formData: FormData): Promise<void> {
   const email = field(formData, 'email', '').trim().toLowerCase();
-  const next = field(formData, 'next', '/');
-  const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/';
+  const next = field(formData, 'next', '/workspaces');
+  const safeNext = next.startsWith('/') && !next.startsWith('//') ? next : '/workspaces';
+  // The sign-up page sends people back to itself so its own wording confirms the email.
+  const page = field(formData, 'from') === 'sign-up' ? '/sign-up' : '/sign-in';
+  const params = (extra: Record<string, string>) =>
+    page === '/sign-up' ? extra : { ...extra, next: safeNext };
   // Phase 7: domains with single sign-on go to the identity provider instead of email.
   let ssoStart: string | null = null;
   try {
@@ -43,9 +47,9 @@ export async function requestMagicLink(formData: FormData): Promise<void> {
       body: { email, callbackURL: safeNext },
     });
   } catch (err) {
-    redirect(back('/sign-in', { error: errorMessage(err), next: safeNext }));
+    redirect(back(page, params({ error: errorMessage(err) })));
   }
-  redirect(back('/sign-in', { sent: email, next: safeNext }));
+  redirect(back(page, params({ sent: email })));
 }
 
 export async function createWorkspace(formData: FormData): Promise<void> {
@@ -59,7 +63,7 @@ export async function createWorkspace(formData: FormData): Promise<void> {
     });
     id = ws.id;
   } catch (err) {
-    redirect(back('/', { error: errorMessage(err) }));
+    redirect(back('/workspaces', { error: errorMessage(err) }));
   }
   redirect(`/w/${id}/connections`);
 }
@@ -196,7 +200,7 @@ export async function deleteWorkspace(workspaceId: string, formData: FormData): 
     redirect(back(`/w/${workspaceId}/settings`, { error: 'Type DELETE to confirm.' }));
   }
   await api(`/v1/workspaces/${workspaceId}`, { method: 'DELETE' });
-  redirect('/?notice=' + encodeURIComponent('Workspace deletion started.'));
+  redirect('/workspaces?notice=' + encodeURIComponent('Workspace deletion started.'));
 }
 
 export async function disconnectAccount(workspaceId: string, accountId: string): Promise<void> {
@@ -336,7 +340,7 @@ export async function removeMember(
   } catch (err) {
     redirect(back(path, { error: errorMessage(err) }));
   }
-  redirect(self ? '/' : back(path, { notice: 'Member removed.' }));
+  redirect(self ? '/workspaces' : back(path, { notice: 'Member removed.' }));
 }
 
 export async function acceptInvitation(token: string): Promise<void> {

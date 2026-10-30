@@ -376,6 +376,14 @@ Everything in this phase sits behind a plan entitlement (`PLANS[plan].features`:
 - **Egress proxy.** `MEDIA_EGRESS_PROXY_URL` routes media downloads through an HTTP(S) proxy (undici `ProxyAgent`), giving customers one address to allow-list; the SSRF guard still runs first.
 - **Regions and reliability.** `REGION` (default `us`) is shown on the workspace and the Security page; `deploy/fly.eu.toml` is the same image deployed as a separate installation with its own database and secrets. `tools/restore-drill.ts` dumps, restores into an empty drill database and compares row counts. `test/integration/chaos.test.ts` drives the engine through random provider outcomes, duplicate and stale-cycle job deliveries, expired leases and clock jumps and asserts at most one provider publish per publication and consistent final states. `docs/soc2-controls.md` maps the Trust Services Criteria to these controls.
 
+### 7.8 Public site and sign-up (2026-10-30)
+
+The web app now has a public face as well as the dashboard. Signed-out visitors can read what Postelyo does before giving an email; the dashboard is unchanged behind sign-in.
+
+- **Routes.** `/` is the marketing homepage (hero, how it works, features, plans, FAQ, final call to action) for everyone; signed-in visitors see "Open dashboard" instead of "Get started". `/pricing` has plan cards and a comparison table. `/sign-up` is a separate page with sign-up wording; it uses the same magic-link flow as `/sign-in` (a first sign-in creates the account and workspace). `/welcome` is first-run onboarding with three tracked steps (Notion connected, a social account connected, a post exists) read from the existing `/v1` endpoints. The workspace list moved from `/` to `/workspaces`, which also shows a "Finish setting up" banner while the owned workspace has no Notion source.
+- **Plan catalog.** `GET /v1/plans` (no auth, cacheable for 5 minutes) returns the plans from `plans.ts` with `members: null` for unlimited. The public pages render prices, limits and features from it, so marketing copy cannot drift from what billing enforces. Prices remain placeholders, labelled "early access pricing".
+- **Discoverability.** Root metadata with a title template, Open Graph and Twitter cards, a generated share image (`opengraph-image.tsx`), `sitemap.xml` listing the public pages, and `robots.txt` allowing them while disallowing the dashboard, onboarding, invitations and every api proxy path. `APP_BASE_URL` is the canonical origin.
+
 ## 8. Scheduling architecture
 
 ### 8.1 Time handling
@@ -608,6 +616,7 @@ Never: secrets in Notion properties, in logs, in error messages, in URLs, in cli
 ### 14.2 MVP endpoints (internal, used by the admin UI)
 
 ```
+GET  /v1/plans                            public plan catalog (no auth; marketing site, D61)
 POST /auth/magic-link                    request sign-in link
 GET  /auth/callback                      complete sign-in
 POST /auth/sign-out
@@ -899,3 +908,6 @@ Explicitly **not** done: microservices, event bus, Kubernetes, Redis, automatic 
 | D57 (2026-09-28) | Old audit rows move to `audit_log_archive` in batches; native partitioning is deferred | Partition `audit_log` by month now | Partitioning a live table is a migration with downtime risk; an archive table gives the same query relief with an ordinary expand/contract migration and no operational surprises at current volume. |
 | D58 (2026-09-28) | Regions are separate installations of the same image (`REGION` label, own database, secrets and bucket); no cross-region replication | Multi-master or async replica across regions | Data residency is the customer need; replication across regions would defeat it. Failover is a documented restore into the same region's standby. |
 | D59 (2026-09-28) | The Enterprise plan is custom-priced (not in Stripe Checkout) and granted by operators via `workspace.plan` | Stripe price for Enterprise | Enterprise deals are contracts; the existing operator-granted plan path (D29) already covers it. |
+| D60 (2026-10-30) | The marketing site lives in the dashboard app (`apps/web`) at `/`, `/pricing` and `/sign-up`; the workspace list moves to `/workspaces` | Separate static site or CMS | One deploy, one design system and one sign-up flow; a separate site can come later without changing URLs. |
+| D61 (2026-10-30) | Public pages read plans from an unauthenticated `GET /v1/plans` instead of hard-coding prices | Copy the numbers into the web app | The billing limits stay the single source of truth; changing `plans.ts` updates marketing at the same time. |
+| D62 (2026-10-30) | Placeholder prices are shown, labelled "early access pricing", and the Free plan is presented as "no card needed" | Hide prices until decided | Product owner decision: visitors see real limits now; the label sets expectations until pricing is final. |
