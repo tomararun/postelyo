@@ -29,6 +29,9 @@ jobs:
       DATABASE_URL: postgres://postelyo:postelyo@localhost:5432/postelyo
       APP_BASE_URL: http://localhost:3000
       NODE_ENV: test
+      # Test-only values; real secrets live in the hosting platform, never in CI.
+      AUTH_SECRET: ci-only-auth-secret-not-used-anywhere-else-0000
+      ENCRYPTION_KEYS: ci1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

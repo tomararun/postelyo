@@ -406,12 +406,13 @@ describe('scheduling and publishing', () => {
       })
       .where(eq(publication.id, pub.id));
     stack.enqueue.reset();
+    // Suites share one database: assert on this publication, not on global counts.
     const tick = await stack.services.scheduler.tick('t-lease-2');
-    expect(tick.leasesExpired).toBe(1);
+    expect(tick.leasesExpired).toBeGreaterThanOrEqual(1);
     const row = await reloadPub(pub.id);
     expect(row.state).toBe('ambiguous');
     expect(row.lastErrorMessage).toContain('dead-worker');
-    expect(stack.enqueue.published).toHaveLength(0);
+    expect(stack.enqueue.published.map((p) => p.data.publicationId)).not.toContain(pub.id);
     expect(stack.enqueue.writebacks.map((w) => w.publicationId)).toContain(pub.id);
   });
 
@@ -419,7 +420,10 @@ describe('scheduling and publishing', () => {
     const { pub } = await scheduleDuePage('Lost job');
     await stack.services.scheduler.tick('t-stale');
     stack.enqueue.reset();
-    expect((await stack.services.scheduler.tick('t-stale-2')).requeued).toBe(0);
+    // Not stale yet: this publication is not re-sent (other suites' rows may be).
+    await stack.services.scheduler.tick('t-stale-2');
+    expect(stack.enqueue.published.map((p) => p.data.publicationId)).not.toContain(pub.id);
+    stack.enqueue.reset();
     stack.clock.advance(3 * 60_000);
     const tick = await stack.services.scheduler.tick('t-stale-3');
     expect(tick.requeued).toBeGreaterThanOrEqual(1);
