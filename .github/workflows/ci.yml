@@ -1,9 +1,15 @@
 name: CI
 
+# Release flow (architecture D63): all work lands on `staging`; `production` changes only
+# through a pull request from `staging`. This workflow is the test gate:
+#   - pull requests into staging or production run it directly (required check "check"
+#     on the production branch);
+#   - pushes to staging/production run it through deploy.yml before anything ships.
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [staging, production]
+  workflow_call:
+  workflow_dispatch:
 
 jobs:
   check:
@@ -31,6 +37,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run lint
+      - run: npm run format:check
       - run: npm run typecheck
       - run: npm run test
       - run: npm run db:migrate

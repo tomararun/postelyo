@@ -31,7 +31,7 @@ Related: [product-requirements.md](./product-requirements.md) §8 · [runbook.md
 - [ ] LinkedIn developer app created; products **Sign In with LinkedIn using OpenID Connect** and **Share on LinkedIn** approved; redirect URL `https://<app>/oauth/linkedin/callback` registered. Verify the Posts API version pinned in `linkedin-provider.ts` (`202509`) is still supported; bump and rerun the contract tests if not.
 - [ ] SMTP provider account (Resend or Postmark) with a verified sender for `MAIL_FROM`.
 - [ ] `ALERT_EMAIL` decided (product decision P5).
-- [ ] Fly.io apps created for staging and production, Fly Postgres attached, secrets set (see `deploy/fly.toml` header). GitHub: `FLY_API_TOKEN` secret, `FLY_APP_STAGING` / `FLY_APP_PRODUCTION` variables, `production` environment with required reviewer.
+- [ ] Fly.io apps created for staging and production, Fly Postgres attached, secrets set (see `deploy/fly.toml` header). Website apps created from `deploy/fly.web.toml` for both environments. GitHub: `FLY_API_TOKEN` secret and the `FLY_APP_STAGING`, `FLY_WEB_APP_STAGING`, `FLY_APP_PRODUCTION`, `FLY_WEB_APP_PRODUCTION` variables (branch protection and the `production` environment approval are already configured; see runbook "Release process").
 - [ ] `ENCRYPTION_KEYS` and `AUTH_SECRET` generated with `openssl rand -base64 32`; stored only in the host secret store.
 - [ ] Sentry project created; `SENTRY_DSN` set (optional but recommended).
 

@@ -1,0 +1,48 @@
+# Fly.io configuration for the website and dashboard (apps/web), one app per environment
+# (architecture D63). The api/worker app is deploy/fly.toml. The Deploy workflow builds the
+# image with the environment's API_INTERNAL_URL (http://<api-app>.internal:3000, Fly private
+# network) and APP_BASE_URL, and passes both again at deploy time.
+# Deploy by hand with:
+#   flyctl deploy --config deploy/fly.web.toml --app <web-app> --image <image>
+# No secrets: the web app holds no credentials; it forwards the visitor's session cookie.
+# Set APP_BASE_URL on the api app to this app's public origin so sign-in links,
+# OAuth redirects and invitations point here.
+
+app = "postelyo-web"
+primary_region = "fra"
+kill_signal = "SIGTERM"
+kill_timeout = "20s"
+
+[build]
+  dockerfile = "../apps/web/Dockerfile"
+
+[deploy]
+  strategy = "rolling"
+
+[env]
+  NODE_ENV = "production"
+  PORT = "3001"
+  HOSTNAME = "0.0.0.0"
+
+[http_service]
+  internal_port = 3001
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 400
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "15s"
+    method = "GET"
+    path = "/robots.txt"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

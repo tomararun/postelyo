@@ -784,7 +784,7 @@ Principles: tests for the publish path must cover crash points (before lease, af
 ### 18.1 MVP
 
 - One Docker image; two services from it on a PaaS (recommendation: **Railway** or **Fly.io**; Render also fine): `api` (1 instance, HTTP) and `worker` (1 instance). Managed Postgres from the same provider or **Neon**.
-- GitHub Actions: `ci.yml` (lint, type-check, unit, integration) on every PR; `deploy.yml` on merge to `main`: build image → run migrations (`drizzle-kit migrate`) as a one-off job → deploy `worker` then `api`.
+- GitHub Actions (D63): `ci.yml` (lint, format, type-check, unit, integration, build, audit) on every pull request into `staging` or `production`; `deploy.yml` on push to `staging` (deploys the staging apps) or `production` (deploys the live apps after an approval). Each run builds the api/worker image and an environment-specific web image, deploys the api first (migrations as its release command), then the website.
 - Migrations are **expand/contract** (additive first, remove later) so a running worker never breaks mid-deploy.
 - Environments: `dev` (local), `staging` (same PaaS, own DB, fake provider by default), `production`.
 - Backups: provider's daily automated backups + weekly restore drill in staging.
@@ -911,3 +911,4 @@ Explicitly **not** done: microservices, event bus, Kubernetes, Redis, automatic 
 | D60 (2026-10-30) | The marketing site lives in the dashboard app (`apps/web`) at `/`, `/pricing` and `/sign-up`; the workspace list moves to `/workspaces` | Separate static site or CMS | One deploy, one design system and one sign-up flow; a separate site can come later without changing URLs. |
 | D61 (2026-10-30) | Public pages read plans from an unauthenticated `GET /v1/plans` instead of hard-coding prices | Copy the numbers into the web app | The billing limits stay the single source of truth; changing `plans.ts` updates marketing at the same time. |
 | D62 (2026-10-30) | Placeholder prices are shown, labelled "early access pricing", and the Free plan is presented as "no card needed" | Hide prices until decided | Product owner decision: visitors see real limits now; the label sets expectations until pricing is final. |
+| D63 (2026-10-31) | Two long-lived branches: `staging` (default; every push tests and deploys to staging) and `production` (live; only via pull request from `staging`, required `check`, deployment approval). `main` is kept but unused | Trunk on `main` with manual production dispatch | Product owner decision: every change is exercised on staging first, and the live platform moves only by a reviewed, tested promotion. |

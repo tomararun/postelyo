@@ -8,6 +8,12 @@ COPY apps/api/package.json apps/api/
 COPY packages/publishing-core/package.json packages/publishing-core/
 RUN npm ci
 COPY apps/web ./apps/web
+# Baked into the build (Next.js rewrites and canonical URLs); the Deploy workflow passes the
+# environment's values. Defaults suit a local build.
+ARG API_INTERNAL_URL=http://localhost:3000
+ARG APP_BASE_URL=http://localhost:3001
+ENV API_INTERNAL_URL=$API_INTERNAL_URL
+ENV APP_BASE_URL=$APP_BASE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build --workspace apps/web
 

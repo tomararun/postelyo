@@ -103,8 +103,24 @@ Editors retry in Notion by moving `Status` away from `Scheduled` and back, or by
 
 ## 4. Routine procedures
 
+### Release process (branches and environments)
+
+| Branch | Role | What a push does |
+|--------|------|------------------|
+| `staging` | Default branch; all work lands here | Full test suite, then (once the Fly apps exist) deploys to the **staging** api and website apps |
+| `production` | The live platform | Changes only through a pull request from `staging`; the PR must pass the `check` job; the merge runs the tests again, then waits for **your approval** in GitHub before deploying to the **production** apps |
+| `main` | Kept for history, not used | Nothing |
+
+Going live with a set of changes:
+1. Push to `staging` and test on the staging site.
+2. Open a pull request **staging → production** on GitHub (or `gh pr create --base production --head staging`). Wait for the `check` job to pass.
+3. Merge it. The Deploy workflow starts; open the run, review, and **Approve** the production deployment.
+4. Smoke checks hit `/health/ready` on the api and `/sign-in` on the website; the run fails if either is down.
+
+Branch protection: `production` requires a pull request, a passing `check`, and forbids force pushes and deletion (admins included). `staging` forbids force pushes and deletion. The `production` environment only accepts deployments from the `production` branch.
+
 ### Deploy
-`git push` to `main` deploys **staging** automatically (build → push image → `flyctl deploy` with the migration as release command → smoke check). Production is a manual `workflow_dispatch` with target `production` and requires the environment approval in GitHub. Migrations are expand/contract; never drop a column in the same release that stops writing it.
+`.github/workflows/deploy.yml` builds two images per run: the api/worker image (`deploy/fly.toml`) and an environment-specific website image (`deploy/fly.web.toml`; its api address and public origin are baked in at build time). Order: api first (its release command runs the migrations), smoke check, then the website, smoke check. Deploy jobs skip themselves until these repository variables exist: `FLY_APP_STAGING`, `FLY_WEB_APP_STAGING`, `FLY_APP_PRODUCTION`, `FLY_WEB_APP_PRODUCTION` (optional `APP_BASE_URL_STAGING` / `APP_BASE_URL_PRODUCTION`; default `https://<web-app>.fly.dev`), plus the `FLY_API_TOKEN` secret. Redeploy without a new commit: Actions → Deploy → Run workflow (production only from the `production` branch). Migrations are expand/contract; never drop a column in the same release that stops writing it.
 
 ### Rollback
 `flyctl releases --app <app>` then `flyctl deploy --image <previous tag>`. Migrations are additive, so the previous image runs against the newer schema.

@@ -1,14 +1,23 @@
 name: Deploy
 
-# Architecture §18.1: build once, migrate, deploy worker then api (Fly rolls both
-# process groups from the same image; migrations run as the release command).
+# Release flow (architecture D63):
+#   push to `staging`    -> tests -> build images -> deploy to the staging apps
+#   push to `production` -> tests -> build images -> approval -> deploy to the live apps
+# `production` only moves through a pull request from `staging` (branch protection).
+# Each environment has two Fly apps: the api/worker (deploy/fly.toml) and the website and
+# dashboard (deploy/fly.web.toml). Deploy jobs skip themselves until the Fly app names are
+# set as repository variables, so pushes stay green before hosting exists.
+#
+# Repository variables:  FLY_APP_STAGING, FLY_WEB_APP_STAGING, FLY_APP_PRODUCTION,
+#                        FLY_WEB_APP_PRODUCTION, optional APP_BASE_URL_STAGING / _PRODUCTION
+# Repository secret:     FLY_API_TOKEN
 on:
   push:
-    branches: [main]
+    branches: [staging, production]
   workflow_dispatch:
     inputs:
       target:
-        description: Environment to deploy
+        description: Environment to redeploy (production only from the production branch)
         type: choice
         options: [staging, production]
         default: staging
@@ -18,66 +27,131 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  image:
-    name: Build image
+  test:
+    name: Test
+    uses: ./.github/workflows/ci.yml
+
+  plan:
+    name: Resolve target
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.t.outputs.environment }}
+      api_app: ${{ steps.t.outputs.api_app }}
+      web_app: ${{ steps.t.outputs.web_app }}
+      base_url: ${{ steps.t.outputs.base_url }}
+      enabled: ${{ steps.t.outputs.enabled }}
+    steps:
+      - id: t
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_TARGET: ${{ inputs.target }}
+          BRANCH: ${{ github.ref_name }}
+          API_STAGING: ${{ vars.FLY_APP_STAGING }}
+          WEB_STAGING: ${{ vars.FLY_WEB_APP_STAGING }}
+          URL_STAGING: ${{ vars.APP_BASE_URL_STAGING }}
+          API_PRODUCTION: ${{ vars.FLY_APP_PRODUCTION }}
+          WEB_PRODUCTION: ${{ vars.FLY_WEB_APP_PRODUCTION }}
+          URL_PRODUCTION: ${{ vars.APP_BASE_URL_PRODUCTION }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then target="$INPUT_TARGET"; else target="$BRANCH"; fi
+          if [ "$target" = "production" ] && [ "$BRANCH" != "production" ]; then
+            echo "::error::Production deploys only run from the production branch (got $BRANCH)."
+            exit 1
+          fi
+          if [ "$target" = "production" ]; then
+            api="$API_PRODUCTION"; web="$WEB_PRODUCTION"; url="$URL_PRODUCTION"
+          else
+            target="staging"; api="$API_STAGING"; web="$WEB_STAGING"; url="$URL_STAGING"
+          fi
+          if [ -n "$api" ] && [ -n "$web" ]; then enabled=true; else enabled=false; fi
+          [ -z "$url" ] && [ -n "$web" ] && url="https://$web.fly.dev"
+          {
+            echo "environment=$target"
+            echo "api_app=$api"
+            echo "web_app=$web"
+            echo "base_url=$url"
+            echo "enabled=$enabled"
+          } >> "$GITHUB_OUTPUT"
+          if [ "$enabled" = "true" ]; then
+            echo "Deploying $BRANCH to $target ($api, $web, $url)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Fly apps for $target are not configured yet; tests ran, nothing was deployed." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  images:
+    name: Build images
+    needs: [test, plan]
+    if: needs.plan.outputs.enabled == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     outputs:
-      tag: ${{ steps.meta.outputs.tag }}
+      api: ${{ steps.meta.outputs.api }}
+      web: ${{ steps.meta.outputs.web }}
     steps:
       - uses: actions/checkout@v4
       - id: meta
-        run: echo "tag=ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "api=$repo:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+          echo "web=$repo-web:${{ needs.plan.outputs.environment }}-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - name: Api and worker image
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: apps/api/Dockerfile
           push: true
-          tags: ${{ steps.meta.outputs.tag }}
+          tags: ${{ steps.meta.outputs.api }}
           build-args: APP_VERSION=${{ github.sha }}
+      # The dashboard bakes its api address and public origin in at build time
+      # (Next.js rewrites), so each environment gets its own web image.
+      - name: Website and dashboard image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.web }}
+          build-args: |
+            API_INTERNAL_URL=http://${{ needs.plan.outputs.api_app }}.internal:3000
+            APP_BASE_URL=${{ needs.plan.outputs.base_url }}
 
-  staging:
-    name: Deploy staging
-    needs: image
-    if: github.event_name == 'push' || inputs.target == 'staging'
+  deploy:
+    name: Deploy ${{ needs.plan.outputs.environment }}
+    needs: [plan, images]
     runs-on: ubuntu-latest
-    environment: staging
+    # The "production" environment requires an approval before this job starts.
+    environment:
+      name: ${{ needs.plan.outputs.environment }}
+      url: ${{ needs.plan.outputs.base_url }}
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      API_APP: ${{ needs.plan.outputs.api_app }}
+      WEB_APP: ${{ needs.plan.outputs.web_app }}
+      BASE_URL: ${{ needs.plan.outputs.base_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: >
-          flyctl deploy --config deploy/fly.toml --app "$FLY_APP"
-          --image "${{ needs.image.outputs.tag }}"
+      # Api first: migrations run as its release command before the new web app talks to it.
+      - name: Deploy api and worker
+        run: >
+          flyctl deploy --config deploy/fly.toml --app "$API_APP"
+          --image "${{ needs.images.outputs.api }}"
           --env APP_VERSION="${{ github.sha }}" --wait-timeout 300
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          FLY_APP: ${{ vars.FLY_APP_STAGING }}
-      - name: Smoke check
-        run: curl --fail --silent "https://${{ vars.FLY_APP_STAGING }}.fly.dev/health/ready"
-
-  production:
-    name: Deploy production
-    needs: [image, staging]
-    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production'
-    runs-on: ubuntu-latest
-    # Requires a reviewer approval configured on the "production" environment.
-    environment: production
-    steps:
-      - uses: actions/checkout@v4
-      - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: >
-          flyctl deploy --config deploy/fly.toml --app "$FLY_APP"
-          --image "${{ needs.image.outputs.tag }}"
-          --env APP_VERSION="${{ github.sha }}" --wait-timeout 300
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-          FLY_APP: ${{ vars.FLY_APP_PRODUCTION }}
-      - name: Smoke check
-        run: curl --fail --silent "https://${{ vars.FLY_APP_PRODUCTION }}.fly.dev/health/ready"
+      - name: Api smoke check
+        run: curl --fail --silent --retry 5 --retry-delay 5 "https://$API_APP.fly.dev/health/ready"
+      - name: Deploy website and dashboard
+        run: >
+          flyctl deploy --config deploy/fly.web.toml --app "$WEB_APP"
+          --image "${{ needs.images.outputs.web }}"
+          --env APP_BASE_URL="$BASE_URL"
+          --env API_INTERNAL_URL="http://$API_APP.internal:3000"
+          --wait-timeout 300
+      - name: Website smoke check
+        run: curl --fail --silent --retry 5 --retry-delay 5 -o /dev/null "$BASE_URL/sign-in"

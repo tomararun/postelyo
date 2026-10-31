@@ -8,8 +8,9 @@
 #   ANTHROPIC_API_KEY (AI_MODEL optional, defaults to claude-opus-5)
 #   MEDIA_EGRESS_PROXY_URL (optional, Phase 7 fixed-IP media downloads)
 # REGION below labels the installation; deploy/fly.eu.toml is the EU twin with its own secrets.
-# The dashboard (apps/web) is a separate Fly app built from apps/web/Dockerfile with API_INTERNAL_URL
-# pointing at this app's internal address and APP_BASE_URL set to the dashboard's public origin.
+# The website and dashboard (apps/web) are a separate Fly app: deploy/fly.web.toml. Set APP_BASE_URL
+# here to that app's public origin. Release flow (D63): staging branch -> staging apps, production
+# branch (pull request from staging only) -> production apps, via .github/workflows/deploy.yml.
 
 app = "postelyo"
 primary_region = "fra"
