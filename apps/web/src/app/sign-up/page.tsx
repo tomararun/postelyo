@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { AuthLayout } from '@/components/auth-layout';
 import { EmailForm } from '@/components/email-form';
+import { DevLinkNotice } from '@/components/dev-link';
 import { Notice } from '@/components/ui';
-import { getMe } from '@/lib/api';
+import { devMagicLink, getMe } from '@/lib/api';
 
 export const metadata: Metadata = {
   title: 'Create your account',
@@ -25,6 +26,7 @@ export default async function SignUpPage({
 }) {
   const { sent, error } = await searchParams;
   if (await getMe()) redirect('/welcome');
+  const devLink = await devMagicLink(sent);
   return (
     <AuthLayout>
       <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200 ring-inset">
@@ -54,6 +56,7 @@ export default async function SignUpPage({
             finish creating your account.
           </Notice>
         )}
+        {devLink && <DevLinkNotice href={devLink} />}
         {error && <Notice kind="error">{error}</Notice>}
         <EmailForm next="/welcome" from="sign-up" sent={sent} label="Create free account" />
         <p className="pt-2 text-center text-sm text-[var(--muted)]">

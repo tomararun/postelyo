@@ -19,6 +19,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx --conditions=development --env-file-if-exists=../../.env src/infra/db/migrate.ts",
     "db:studio": "drizzle-kit studio",
+    "dev:db": "tsx --conditions=development src/tools/dev-db.ts",
     "preflight": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/preflight.ts",
     "notion:template": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/create-notion-template.ts",
     "seed": "tsx --conditions=development --env-file-if-exists=../../.env src/tools/seed.ts",

@@ -80,7 +80,7 @@ Per-workspace counts of published, failed, needs-review, accounts needing re-aut
 | Connect or disconnect LinkedIn Pages | Connections → *Connect LinkedIn Pages you administer* / *Disconnect* per Page | admin+ |
 | Replace the Notion token | Connections → Notion form | admin+ |
 | Change the daily cap or enable webhooks | `PATCH /v1/workspaces/:ws {"dailyCapPerAccount": 50}` / `{"notionWebhooks": true}` | admin+ |
-| Enable X, Facebook or Instagram for a workspace | `PATCH /v1/workspaces/:ws {"providers": {"x": true, "facebook": true, "instagram": true}}` (server app credentials must be set too) | admin+ |
+| Enable Facebook or Instagram, or switch X off, for a workspace | `PATCH /v1/workspaces/:ws {"providers": {"facebook": true, "instagram": true}}` or `{"providers": {"x": false}}`. X is on by default (D66). Server app credentials must be set for any of them | admin+ |
 | Connect X / Facebook Pages + Instagram | Connections → *Connect X profile* / *Connect Facebook Pages you manage* | admin+ |
 | Invite a member, change a role, remove a member | Dashboard → Team, or `POST /v1/workspaces/:ws/invitations {email, role}` / `PATCH .../members/:userId {role}` / `DELETE .../members/:userId` | admin+ (owner role: owners only) |
 | Comp a plan (pilot, partner) with no Stripe subscription | `update workspace set plan = 'team' where id = '...'` (any of `free`, `solo`, `team`, `agency`); takes effect immediately, overridden the moment a Stripe subscription exists | operator |

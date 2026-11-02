@@ -201,8 +201,15 @@ export function notionWebhooksEnabled(ws: Pick<Workspace, 'settings'>): boolean 
 }
 
 /** LinkedIn is always enabled; the others need the workspace flag. */
+/**
+ * Launch platforms that are on unless a workspace switches them off (D66). The others
+ * (Facebook, Instagram) stay opt-in until their app reviews are done.
+ */
+export const DEFAULT_ON_PROVIDERS: readonly FlaggedProvider[] = ['x'];
+
 export function providerEnabled(ws: Pick<Workspace, 'settings'>, provider: string): boolean {
   if (provider === 'linkedin' || provider === 'fake') return true;
   const flags = readSettings(ws).providers ?? {};
-  return flags[provider as FlaggedProvider] === true;
+  const explicit = flags[provider as FlaggedProvider];
+  return explicit ?? DEFAULT_ON_PROVIDERS.includes(provider as FlaggedProvider);
 }

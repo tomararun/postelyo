@@ -33,8 +33,8 @@ jobs:
       AUTH_SECRET: ci-only-auth-secret-not-used-anywhere-else-0000
       ENCRYPTION_KEYS: ci1:BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: .node-version
           cache: npm

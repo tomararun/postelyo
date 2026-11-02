@@ -14,3 +14,5 @@ Thumbs.db
 .next/
 next-env.d.ts
 *.tsbuildinfo
+# Local Postgres for npm run dev:db
+.devdata/

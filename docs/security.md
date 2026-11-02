@@ -215,7 +215,7 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 
 ## 12. Security checklist per release
 
-- [ ] `npm audit` clean of high/critical
+- [ ] `npm audit` clean of high/critical; moderate findings reviewed against §13
 - [ ] gitleaks clean
 - [ ] Tenancy test suite green
 - [ ] Redaction test: sample logs and Sentry events from a publish run contain no token-shaped strings
@@ -228,3 +228,14 @@ Only through `CredentialVault.withCredential(accountId, reason, fn)`, which decr
 - [ ] Phase 6: every new AI purpose goes through `AiService.generate` (budget, guardrail, audit) and writes only user-owned optional columns or new Draft pages
 - [ ] Phase 4: pages Postelyo creates in Notion (instances, promoted ideas) copy only allow-listed properties and supported block types; no system column is ever written from user text except through the writeback allow-list
 - [ ] Phase 4: short-link redirects only to `http(s)` targets that came from the workspace's own content; codes are random and rate-limited by the platform
+
+## 13. Accepted dependency advisories
+
+The CI gate fails on high and critical advisories (`npm audit --audit-level=high`). Moderate ones are reviewed here; each needs a reason and a revisit trigger. Last review: 2026-11-03.
+
+| Advisory (moderate) | Where it comes from | Why it is accepted | Revisit when |
+|---------------------|---------------------|--------------------|--------------|
+| esbuild development server lets other sites read its responses | `drizzle-kit` (migration generator) via `@esbuild-kit/*`; also pulled into production installs by `better-auth` | Only affects `esbuild --serve`, which Postelyo never starts; `drizzle-kit` is not invoked at runtime. Overriding the bundled esbuild risks breaking `db:generate`. | `drizzle-kit` or `better-auth` ships a release without `@esbuild-kit` |
+| `minimatch` pattern denial of service (and the `eslint` / `typescript-eslint` packages that depend on it) | Linting only (`eslint`, `typescript-eslint`) | Development tooling run on our own source, never on user input, never in an image | `eslint` / `typescript-eslint` publish versions on a fixed `minimatch` |
+
+`npm audit fix --force` proposes downgrading these to versions years old (for example eslint 4, drizzle-kit 0.18); do not run it.

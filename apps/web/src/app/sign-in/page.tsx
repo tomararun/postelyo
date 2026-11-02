@@ -3,8 +3,9 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { AuthLayout } from '@/components/auth-layout';
 import { EmailForm } from '@/components/email-form';
+import { DevLinkNotice } from '@/components/dev-link';
 import { Notice } from '@/components/ui';
-import { getMe } from '@/lib/api';
+import { devMagicLink, getMe } from '@/lib/api';
 
 export const metadata: Metadata = { title: 'Sign in', robots: { index: false } };
 
@@ -16,6 +17,7 @@ export default async function SignInPage({
   const { sent, error, next } = await searchParams;
   const target = next && next.startsWith('/') && !next.startsWith('//') ? next : '/workspaces';
   if (await getMe()) redirect(target);
+  const devLink = await devMagicLink(sent);
   return (
     <AuthLayout>
       <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Welcome back</h1>
@@ -29,6 +31,7 @@ export default async function SignInPage({
             minutes.
           </Notice>
         )}
+        {devLink && <DevLinkNotice href={devLink} />}
         {error && <Notice kind="error">{error}</Notice>}
         <EmailForm next={target} from="sign-in" sent={sent} label="Continue with email" />
         <p className="pt-2 text-center text-sm text-[var(--muted)]">

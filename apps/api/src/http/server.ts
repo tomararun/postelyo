@@ -35,6 +35,7 @@ import { workspaceRoutes } from './routes/workspaces.js';
 import { enterpriseRoutes } from './routes/enterprise.js';
 import { publicApiRoutes } from './routes/public-api.js';
 import { ssoRoutes } from './routes/sso.js';
+import { devRoutes, devRoutesAllowed } from './routes/dev.js';
 
 export interface ServerDeps {
   env: Env;
@@ -149,6 +150,9 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     billing: deps.services.billing,
   });
   await app.register(legalRoutes);
+  if (devRoutesAllowed(deps.env, deps.mailer)) {
+    await app.register(devRoutes, { mailer: deps.mailer });
+  }
   await app.register(linkRoutes, { links: deps.services.links });
   await app.register(mediaRoutes, { storage: deps.services.storage });
   await app.register(pageRoutes, {

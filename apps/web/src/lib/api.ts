@@ -98,3 +98,24 @@ export function errorMessage(err: unknown): string {
 
 export const fmt = (d: string | null | undefined) =>
   d ? new Date(d).toISOString().replace('T', ' ').slice(0, 16) + 'Z' : '—';
+
+/**
+ * Local development only (D67): the sign-in link the api "sent" to `email`. Next.js sets
+ * NODE_ENV=production in every build, so this returns null outside `next dev`.
+ */
+export async function devMagicLink(email: string | undefined): Promise<string | null> {
+  if (process.env.NODE_ENV !== 'development' || !email) return null;
+  try {
+    const res = await fetch(`${API_URL}/v1/dev/magic-link?email=${encodeURIComponent(email)}`, {
+      cache: 'no-store',
+    });
+    if (!res.ok) return null;
+    const body = (await res.json()) as { url?: string | null };
+    if (!body.url) return null;
+    // The link points at the api's APP_BASE_URL; keep only the path so it opens on this origin.
+    const u = new URL(body.url);
+    return u.pathname + u.search;
+  } catch {
+    return null;
+  }
+}

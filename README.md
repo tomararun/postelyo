@@ -17,17 +17,20 @@ The api consumes the package from source in development and tests (`development`
 
 ## Local development
 
-Requirements: Node 22 (see `.node-version`), Docker (for Postgres and Mailpit).
+Requirements: Node 22 (see `.node-version`). Docker is optional.
 
 ```bash
 cp .env.example .env
-docker compose up -d
 npm ci
-npm run db:migrate
-npm run dev:api      # http://localhost:3000/health/live
-npm run dev:worker   # in a second terminal
-npm run dev:web      # http://localhost:3001 (dashboard; set APP_BASE_URL=http://localhost:3001 in .env)
+npm run dev:db       # terminal 1: local Postgres on 5433, migrations applied, keeps running
+npm run dev:api      # terminal 2: http://localhost:3000/health/live
+npm run dev:worker   # terminal 3
+npm run dev:web      # terminal 4: http://localhost:3001 (website and dashboard)
 ```
+
+`npm run dev:db` needs no Docker: it runs an embedded Postgres with its data in `.devdata/` (git-ignored), applies new migrations every time it starts, and creates the restricted `postelyo_app` role the app connects as, so row-level security behaves as in production. The `.env.example` defaults already point at it. On Windows the bundled Postgres needs the Microsoft Visual C++ 2015-2022 x64 runtime (`winget install --id Microsoft.VCRedist.2015+.x64 -e`).
+
+Prefer Docker? Run `docker compose up -d` (Postgres on 5432 plus Mailpit), switch `DATABASE_URL` to the commented Docker line in `.env`, and run `npm run db:migrate` instead of `npm run dev:db`.
 
 `PROVIDER_MODE=fake` (default) runs the whole pipeline without calling any social platform. Media is stored under `.data/media` (`STORAGE_DRIVER=local`) and served by the api at `/media/*`; production uses `STORAGE_DRIVER=s3` (Cloudflare R2). Image processing uses `sharp`, which ships prebuilt binaries for Windows, macOS, Linux and the Alpine Docker image.
 
@@ -35,6 +38,7 @@ npm run dev:web      # http://localhost:3001 (dashboard; set APP_BASE_URL=http:/
 
 | Command                                                          | Purpose                                                                                 |
 | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `npm run dev:db`                                                 | Local Postgres without Docker (port 5433, data in `.devdata/`, migrations on start)     |
 | `npm run dev:api` / `npm run dev:worker` / `npm run dev:web`     | Run with hot reload (api on 3000, dashboard on 3001)                                    |
 | `npm run build`                                                  | Compile `packages/publishing-core/dist`, `apps/api/dist` and the Next.js dashboard      |
 | `npm run lint` / `npm run typecheck`                             | Static checks                                                                           |
@@ -48,7 +52,7 @@ npm run dev:web      # http://localhost:3001 (dashboard; set APP_BASE_URL=http:/
 
 ## Sign-in during development
 
-With `MAIL_TRANSPORT=log` the magic link is printed in the api log. Open it in the browser to sign in; a workspace is created on first sign-in.
+With `MAIL_TRANSPORT=log` (the default) no email is sent. After you enter an email on the sign-in or sign-up page, the page shows an **Open sign-in link** button with the link the api just created; it is also printed in the api log. A workspace is created on first sign-in. The button exists only under `next dev` with `NODE_ENV=development`; production refuses the log transport.
 
 ## Status
 

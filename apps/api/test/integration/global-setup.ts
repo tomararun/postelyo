@@ -2,10 +2,10 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import type { TestProject } from 'vitest/node';
 import { createDb } from '../../src/infra/db/client.js';
+import { ensureAppRole } from '../../src/infra/db/app-role.js';
 
 /**
  * Integration test database. Uses DATABASE_URL when set (CI); otherwise boots a
@@ -16,9 +16,6 @@ import { createDb } from '../../src/infra/db/client.js';
  * superusers bypass row-level security, so testing tenancy as the owner would
  * prove nothing. The owner URL is kept for migrations only.
  */
-const APP_ROLE = 'postelyo_app';
-const APP_PASSWORD = 'postelyo_app';
-
 export default async function setup(project: TestProject): Promise<() => Promise<void>> {
   let url = process.env['DATABASE_URL'];
   let stop: (() => Promise<void>) | undefined;
@@ -52,7 +49,7 @@ export default async function setup(project: TestProject): Promise<() => Promise
     '../../drizzle',
   );
   await migrate(database.db, { migrationsFolder });
-  const appUrl = await createAppRole(database.db, url);
+  const appUrl = await ensureAppRole(database.db, url);
   await database.close();
 
   process.env['DATABASE_URL'] = appUrl;
@@ -61,32 +58,6 @@ export default async function setup(project: TestProject): Promise<() => Promise
   return async () => {
     await stop?.();
   };
-}
-
-/** Creates (or refreshes) the restricted app role and returns a connection URL for it. */
-async function createAppRole(db: ReturnType<typeof createDb>['db'], ownerUrl: string) {
-  const dbName = new URL(ownerUrl).pathname.replace(/^\//, '');
-  const exists = await db.execute<{ n: string }>(
-    sql`select count(*)::text as n from pg_roles where rolname = ${APP_ROLE}`,
-  );
-  if (Number([...exists][0]?.n ?? 0) === 0) {
-    await db.execute(
-      sql.raw(`create role ${APP_ROLE} login password '${APP_PASSWORD}' nosuperuser nobypassrls`),
-    );
-  }
-  await db.execute(sql.raw(`grant connect, create, temp on database "${dbName}" to ${APP_ROLE}`));
-  for (const schema of ['public', 'drizzle']) {
-    await db.execute(sql.raw(`grant usage on schema ${schema} to ${APP_ROLE}`));
-    await db.execute(sql.raw(`grant all on all tables in schema ${schema} to ${APP_ROLE}`));
-    await db.execute(sql.raw(`grant all on all sequences in schema ${schema} to ${APP_ROLE}`));
-    await db.execute(
-      sql.raw(`alter default privileges in schema ${schema} grant all on tables to ${APP_ROLE}`),
-    );
-  }
-  const u = new URL(ownerUrl);
-  u.username = APP_ROLE;
-  u.password = APP_PASSWORD;
-  return u.toString();
 }
 
 declare module 'vitest' {

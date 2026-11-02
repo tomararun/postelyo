@@ -90,19 +90,19 @@ jobs:
       api: ${{ steps.meta.outputs.api }}
       web: ${{ steps.meta.outputs.web }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - id: meta
         run: |
           repo="ghcr.io/${GITHUB_REPOSITORY,,}"
           echo "api=$repo:${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
           echo "web=$repo-web:${{ needs.plan.outputs.environment }}-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Api and worker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/api/Dockerfile
@@ -112,7 +112,7 @@ jobs:
       # The dashboard bakes its api address and public origin in at build time
       # (Next.js rewrites), so each environment gets its own web image.
       - name: Website and dashboard image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/web/Dockerfile
@@ -136,7 +136,7 @@ jobs:
       WEB_APP: ${{ needs.plan.outputs.web_app }}
       BASE_URL: ${{ needs.plan.outputs.base_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: superfly/flyctl-actions/setup-flyctl@master
       # Api first: migrations run as its release command before the new web app talks to it.
       - name: Deploy api and worker

@@ -152,14 +152,22 @@ describe('phase 2 multi-platform', () => {
   // Provider flags and connect flows
   // ---------------------------------------------------------------------------
 
-  it('keeps new providers off until the workspace enables them', async () => {
+  it('has X on by default, keeps Meta opt-in, and respects a workspace switching X off', async () => {
     const before = await accounts();
     expect(before.configured).toEqual({
       linkedin: true,
-      x: false,
+      x: true,
       facebook: false,
       instagram: false,
     });
+    const off = await stack.app.inject({
+      method: 'PATCH',
+      url: `/v1/workspaces/${workspaceId}`,
+      headers: { cookie },
+      payload: { providers: { x: false } },
+    });
+    expect(off.json()).toMatchObject({ providers: { x: false } });
+    expect((await accounts()).configured.x).toBe(false);
     const denied = await connect('x', 'x', 'x-good');
     expect(denied.status).toBe(403);
 

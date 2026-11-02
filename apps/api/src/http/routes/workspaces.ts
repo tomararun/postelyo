@@ -5,7 +5,7 @@ import {
   type WorkspaceService,
 } from '../../modules/workspaces/workspace.service.js';
 import type { Workspace } from '../../infra/db/schema.js';
-import { dailyCapFor, readSettings } from '../../modules/workspaces/settings.js';
+import { dailyCapFor, providerEnabled, readSettings } from '../../modules/workspaces/settings.js';
 import { workspaceDefaultsFromEmail } from '../../modules/workspaces/slug.js';
 import type { WorkspaceDeletionService } from '../../modules/workspaces/workspace-deletion.service.js';
 import type { AccountService } from '../../modules/account/account.service.js';
@@ -106,9 +106,9 @@ export function workspaceDto(w: Workspace, region?: string) {
     notionWebhooks: settings.notionWebhooks === true,
     providers: {
       linkedin: true,
-      x: settings.providers?.x === true,
-      facebook: settings.providers?.facebook === true,
-      instagram: settings.providers?.instagram === true,
+      x: providerEnabled(w, 'x'),
+      facebook: providerEnabled(w, 'facebook'),
+      instagram: providerEnabled(w, 'instagram'),
     },
     notificationEmail: settings.notificationEmail ?? null,
     alertCopyEmail: settings.alertCopyEmail ?? null,
