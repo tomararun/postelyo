@@ -8,7 +8,7 @@ Status: living document, started with Phase 3 (2026-09-26). Audience: whoever si
 
 | Data | Where | Why | Retention |
 |------|-------|-----|-----------|
-| User email, display name | `user` | Sign-in, invitations, notices | Until the account is deleted (manual today) |
+| User email, display name | `user` | Sign-in, invitations, notices | Until the user deletes the account (self-service, D64) |
 | Session records | `session` | Sign-in state | 30 days sliding, 90 days hard cap |
 | Workspace settings, plan, notification addresses | `workspace` | Operate the workspace | Until workspace purge |
 | Notion integration token (internal token or OAuth access token) | `content_source.credential_enc`, envelope-encrypted | Read the content database, write results back | Wiped on disconnect; row removed at purge |
@@ -37,8 +37,8 @@ Not stored: passwords (magic links only), card data (Stripe Checkout and Custome
 
 - **Disconnect** (Notion, social account): credentials wiped immediately, provider revocation attempted where an endpoint exists, audited.
 - **Workspace deletion** (owner only, dashboard *Danger zone* or `DELETE /v1/workspaces/:id`): the workspace is soft-deleted at once (hidden from every member, API access ends, waiting publications cancelled, sources disabled), then the `workspace-delete` job purges it after a 10-minute delay: tokens revoked best-effort, then the workspace row is deleted and every tenant table cascades. The audit trail keeps two `workspace.deleted` entries (`requested`, `purged`) with counts only, and `workspace_id` becomes null on all of the tenant's audit rows.
-- **User deletion**: not self-serve yet. Operators delete the `user` row after the user has left or deleted their workspaces; memberships and sessions cascade. Add to the dashboard when a request arrives (GDPR art. 17 requires acting within a month).
-- **Export**: the Notion database is the customer's own copy of their content and results. A JSON export of publications is a roadmap item; until then operators can run the queries in [runbook.md](./runbook.md) §5 on request.
+- **User deletion** (self-service since 2026-11-03, D64): **Your account → Delete your account**, confirmed by typing the account email. Workspaces where the user is the only member are deleted with the account (normal purge); in shared workspaces the membership ends and social accounts the user connected are disconnected and their tokens wiped. Being the only owner of a workspace with other members blocks deletion until ownership moves. Sessions and sign-in records cascade; the audit trail keeps a `user.deleted` row with the opaque user id only. A confirmation email is sent.
+- **Export** (self-service since 2026-11-03, D65): **Your account → Download my data** gives the personal file (profile, memberships, sessions, invitations sent, own activity). **Settings → Download workspace data** (admins) gives the workspace file (settings, members, connections, campaigns, posts, publications and latest results). Both are JSON, available on every plan, audited, and never contain tokens or secrets. The audit trail has its own NDJSON export on the Security page.
 
 ## 3. Sub-processors (to list in the privacy policy)
 

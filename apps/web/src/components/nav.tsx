@@ -98,7 +98,11 @@ export function PageTitle({ groups, fallback }: { groups: NavGroup[]; fallback: 
   const match = items
     .filter((i) => isActive(pathname, i.href))
     .sort((a, b) => b.href.length - a.href.length)[0];
-  const sub = pathname.includes('/publications/') ? 'Publication' : null;
+  const sub = pathname.includes('/publications/')
+    ? 'Publication'
+    : pathname === '/account'
+      ? 'Your account'
+      : null;
   return (
     <h1 className="text-xl font-semibold tracking-tight text-slate-900 sm:text-2xl">
       {sub ?? match?.label ?? fallback}

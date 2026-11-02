@@ -582,3 +582,15 @@ export async function tenantKeyAction(workspaceId: string, formData: FormData): 
     }),
   );
 }
+
+// --- Account deletion (D64) -------------------------------------------------------
+
+export async function deleteAccount(formData: FormData): Promise<void> {
+  const confirmEmail = field(formData, 'confirmEmail').trim();
+  try {
+    await api('/v1/me', { method: 'DELETE', body: { confirmEmail } });
+  } catch (err) {
+    redirect(back('/account', { error: errorMessage(err) }));
+  }
+  redirect('/goodbye');
+}

@@ -11,6 +11,8 @@ export default function robots(): MetadataRoute.Robots {
       disallow: [
         '/w/',
         '/workspaces',
+        '/account',
+        '/goodbye',
         '/welcome',
         '/sign-in',
         '/invitations/',

@@ -35,7 +35,13 @@ function navFor(id: string): NavGroup[] {
 }
 
 const HOME: NavGroup[] = [
-  { label: 'Account', items: [{ label: 'Workspaces', href: '/workspaces', icon: 'home' }] },
+  {
+    label: 'Account',
+    items: [
+      { label: 'Workspaces', href: '/workspaces', icon: 'home' },
+      { label: 'Your account', href: '/account', icon: 'settings' },
+    ],
+  },
 ];
 
 function Avatar({ email }: { email: string }) {
@@ -102,10 +108,16 @@ export function Shell({
         </div>
         <div className="border-t border-[var(--border)] p-3">
           <div className="flex items-center gap-2.5 rounded-xl px-2 py-1.5">
-            <Avatar email={email} />
-            <span className="min-w-0 flex-1 truncate text-sm text-slate-700" title={email}>
-              {email}
-            </span>
+            <Link
+              href="/account"
+              title="Your account"
+              className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg hover:text-[var(--primary)]"
+            >
+              <Avatar email={email} />
+              <span className="min-w-0 flex-1 truncate text-sm text-slate-700" title={email}>
+                {email}
+              </span>
+            </Link>
             <form action={signOut}>
               <button
                 type="submit"

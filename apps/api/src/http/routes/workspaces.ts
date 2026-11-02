@@ -8,6 +8,7 @@ import type { Workspace } from '../../infra/db/schema.js';
 import { dailyCapFor, readSettings } from '../../modules/workspaces/settings.js';
 import { workspaceDefaultsFromEmail } from '../../modules/workspaces/slug.js';
 import type { WorkspaceDeletionService } from '../../modules/workspaces/workspace-deletion.service.js';
+import type { AccountService } from '../../modules/account/account.service.js';
 import { requireUser } from '../plugins/auth.js';
 import { requireMembership } from '../plugins/tenancy.js';
 
@@ -124,6 +125,8 @@ export interface WorkspaceRoutesOptions {
   workspaces: WorkspaceService;
   deletion: WorkspaceDeletionService;
   region?: string;
+  /** D65: workspace data export. */
+  account?: AccountService;
 }
 
 export const workspaceRoutes: FastifyPluginAsync<WorkspaceRoutesOptions> = async (app, opts) => {
@@ -186,6 +189,23 @@ export const workspaceRoutes: FastifyPluginAsync<WorkspaceRoutesOptions> = async
         }
         throw err;
       }
+    },
+  );
+
+  /** Admins: the whole workspace as a JSON download, without any secret (D65). */
+  app.get(
+    '/v1/workspaces/:workspaceId/export',
+    { preHandler: requireMembership(workspaces, 'admin') },
+    async (req, reply) => {
+      if (!opts.account) return reply.status(404).send();
+      const body = await opts.account.exportWorkspace(req.tenant!);
+      const ws = (body['workspace'] ?? {}) as { slug?: string };
+      void reply.header(
+        'content-disposition',
+        `attachment; filename="postelyo-${ws.slug ?? 'workspace'}-${new Date().toISOString().slice(0, 10)}.json"`,
+      );
+      void reply.header('cache-control', 'no-store');
+      return reply.type('application/json').send(JSON.stringify(body, null, 2));
     },
   );
 

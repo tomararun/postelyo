@@ -12,6 +12,9 @@ import type { Actor } from '../tenancy/tenant-context.js';
 
 export type AuditEvent =
   | 'user.signed_in'
+  | 'user.deleted'
+  | 'account.exported'
+  | 'workspace.exported'
   | 'workspace.created'
   | 'workspace.updated'
   | 'workspace.deleted'

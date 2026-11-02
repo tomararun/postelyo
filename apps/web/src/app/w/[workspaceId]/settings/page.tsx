@@ -220,6 +220,20 @@ export default async function SettingsPage({
           {canManage && <Button>Save</Button>}
         </form>
       </Card>
+      {canManage && (
+        <Card
+          title="Export workspace data"
+          description="Everything your team created here, in one JSON file. Tokens and secrets are never included."
+        >
+          <p className="text-sm text-[var(--muted)]">
+            Includes settings, members, connected accounts, campaigns, every post with its
+            publications, links and latest results. The export is recorded in the audit trail.
+          </p>
+          <Button variant="secondary" href={`/v1/workspaces/${workspaceId}/export`}>
+            Download workspace data
+          </Button>
+        </Card>
+      )}
       {membership.role === 'owner' && (
         <Card title="Danger zone">
           <p className="mb-3 text-sm text-[var(--muted)]">

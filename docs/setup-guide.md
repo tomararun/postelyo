@@ -126,6 +126,10 @@ Rules of thumb:
 - Do not edit the `Postelyo …`, `Published …` columns; Postelyo overwrites them.
 - A post is never published twice, even if the service restarts.
 
+## Your data and your account
+
+**Your account** (click your email at the bottom of the sidebar) lets you download a copy of your personal data and delete your account. Admins can download everything a workspace contains under **Settings → Download workspace data**. Deleting your account removes workspaces where you are the only member; in shared workspaces you are removed and the social accounts you connected are disconnected. If you are the only owner of a team workspace, make someone else owner on the Team page first.
+
 ## Where to look when something is off
 
 - **Posts** page in Postelyo: every post, its state, the LinkedIn link, and for failures the exact reason.

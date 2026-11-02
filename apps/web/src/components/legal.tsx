@@ -6,7 +6,7 @@ import { Notice } from '@/components/ui';
 export const PRIVACY = [
   'Postelyo stores the content you schedule, the results of publishing it, the social accounts you connect (access tokens encrypted at rest) and the Notion integration token you provide, in order to publish on your behalf and report back.',
   'We do not sell data. Tokens are decrypted only inside the background worker at publish time and never shown in the interface or logs.',
-  'Deleting a workspace removes its content, connections and tokens; anonymised audit records are retained for security purposes.',
+  'Deleting a workspace removes its content, connections and tokens; anonymised audit records are retained for security purposes. You can download your data and delete your account yourself on the Your account page; deleting your account also disconnects social accounts you connected in shared workspaces.',
   'Contact: privacy@postelyo.example (placeholder).',
 ];
 

@@ -170,11 +170,16 @@ export async function buildServer(deps: ServerDeps): Promise<App> {
     appBaseUrl: deps.env.APP_BASE_URL,
   });
   await app.register(oauthRoutes, { linkedin, x, meta, notion });
-  await app.register(meRoutes, { workspaces });
+  await app.register(meRoutes, {
+    workspaces,
+    account: deps.services.account,
+    appBaseUrl: deps.env.APP_BASE_URL,
+  });
   await app.register(workspaceRoutes, {
     workspaces,
     deletion: deps.services.deletion,
     region: deps.env.REGION,
+    account: deps.services.account,
   });
   await app.register(teamRoutes, { workspaces, invitations: deps.services.invitations });
   await app.register(billingRoutes, { workspaces, billing: deps.services.billing });

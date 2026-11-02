@@ -61,6 +61,7 @@ import {
 import { XOAuthClient } from './modules/connections/x/x-oauth.js';
 import { InvitationService } from './modules/workspaces/invitation.service.js';
 import { WorkspaceDeletionService } from './modules/workspaces/workspace-deletion.service.js';
+import { AccountService } from './modules/account/account.service.js';
 import { ReconciliationService } from './modules/publishing/reconciliation.service.js';
 import { createProviderRegistry, type ProviderRegistry } from './modules/publishing/registry.js';
 import { SchedulerService } from './modules/scheduling/scheduler.service.js';
@@ -117,6 +118,8 @@ export interface Services {
   workspaces: WorkspaceService;
   invitations: InvitationService;
   deletion: WorkspaceDeletionService;
+  /** Self-service account deletion and data export (D64, D65). */
+  account: AccountService;
   billing: BillingService;
   vault: CredentialVault;
   socialAccounts: SocialAccountService;
@@ -432,6 +435,14 @@ export function buildServices(deps: ServiceDeps): Services {
     clock,
     logger: deps.logger,
   });
+  const account = new AccountService({
+    db: deps.db,
+    deletion,
+    socialAccounts,
+    mailer: deps.mailer,
+    clock,
+    logger: deps.logger,
+  });
 
   const targets = new NotificationTargets(deps.db, deps.env.ALERT_EMAIL ?? null);
   const heartbeat = new HeartbeatService(deps.db, clock);
@@ -491,6 +502,7 @@ export function buildServices(deps: ServiceDeps): Services {
     workspaces,
     invitations,
     deletion,
+    account,
     billing,
     vault,
     socialAccounts,
